@@ -1,0 +1,9 @@
+mcp[cli]
+docx2pdf
+pdf2docx
+pillow
+pandas
+pdfkit
+markdown
+fastapi
+uvicorn 
