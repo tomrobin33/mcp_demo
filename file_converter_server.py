@@ -1037,5 +1037,4 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
     return debug_json_response(result)
 
 if __name__ == "__main__":
-     import uvicorn
-     uvicorn.run(app, host="0.0.0.0", port=8081)  
+     mcp.run()
