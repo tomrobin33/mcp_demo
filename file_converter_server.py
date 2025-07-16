@@ -407,6 +407,12 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             cv = Converter(actual_file_path)
             cv.convert(temp_output_file, start=0, end=-1)
             cv.close()
+            logger.info(f"转换完成，检查临时输出文件是否存在: {temp_output_file}")
+            if not os.path.exists(temp_output_file):
+                logger.error(f"转换失败，未生成临时输出文件: {temp_output_file}")
+                import shutil
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"PDF转换未生成输出文件，可能源文件损坏或格式不支持。"}
         except Exception as e:
             import shutil
             shutil.rmtree(temp_dir)
