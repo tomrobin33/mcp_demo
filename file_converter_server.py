@@ -408,6 +408,13 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
         if input_file is None and file_content_base64 is None:
             logger.error("No input provided: both input_file and file_content_base64 are None")
             return {"success": False, "error": "You must provide either input_file or file_content_base64"}
+        # 检查 input_file、input_format、output_format 类型，避免 None 传递给 str
+        if input_file is not None and not isinstance(input_file, str):
+            logger.error(f"input_file 类型错误: {type(input_file)}")
+            return {"success": False, "error": "input_file must be a string or None"}
+        if file_content_base64 is not None and not isinstance(file_content_base64, str):
+            logger.error(f"file_content_base64 类型错误: {type(file_content_base64)}")
+            return {"success": False, "error": "file_content_base64 must be a string or None"}
         temp_dir = tempfile.mkdtemp()
         temp_input_file = os.path.join(temp_dir, f"input_{int(time.time())}.pdf")
         temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
@@ -460,6 +467,17 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.docx"
         logger.info(f"准备保存输出文件到: {output_file}")
+        # 自动创建输出文件目录
+        output_dir = os.path.dirname(output_file)
+        os.makedirs(output_dir, exist_ok=True)
+        # 判断临时输出文件是否存在
+        if not os.path.exists(temp_output_file):
+            logger.error(f"临时输出文件未生成: {temp_output_file}")
+            import shutil
+            shutil.rmtree(temp_dir)
+            for f in temp_files:
+                os.remove(f)
+            return {"success": False, "error": f"临时输出文件未生成: {temp_output_file}"}
         try:
             shutil.move(temp_output_file, output_file)
             logger.info(f"已成功保存输出文件到: {output_file}")
