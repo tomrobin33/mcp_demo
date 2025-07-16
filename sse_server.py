@@ -20,4 +20,8 @@ async def sse_endpoint(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
+<<<<<<< HEAD
     uvicorn.run(app, host="0.0.0.0", port=8080) 
+=======
+    uvicorn.run(app, host="0.0.0.0", port=8080) 
+>>>>>>> 1b52fc4dc30ad643051fed263070dce8a211bd67
