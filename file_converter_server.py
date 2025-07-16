@@ -23,6 +23,7 @@ import logging
 import sys
 import time
 import traceback
+import requests
 
 # Set up logging
 logging.basicConfig(
@@ -263,159 +264,89 @@ if hasattr(mcp, 'parse_json'):
 else:
     logger.warning("Cannot enhance JSON parsing, mcp object doesn't have parse_json attribute")
 
+# 辅助函数：判断input_file是否为URL并自动下载
+
+def download_file_from_url(url):
+    """
+    下载远程文件到本地临时文件，返回本地路径
+    """
+    response = requests.get(url, stream=True)
+    response.raise_for_status()
+    suffix = os.path.splitext(url.split("?")[0])[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        for chunk in response.iter_content(chunk_size=8192):
+            tmp_file.write(chunk)
+        return tmp_file.name
+
+def handle_input_file_with_url(input_file, expected_extension: str = None):
+    """
+    如果input_file是URL则下载，否则走原有逻辑。返回(实际本地路径, 是否为临时文件)
+    """
+    if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+        local_path = download_file_from_url(input_file)
+        return local_path, True
+    elif input_file:
+        # 只在expected_extension不为None时传递
+        if expected_extension:
+            path = validate_file_exists(input_file, expected_extension)
+        else:
+            path = validate_file_exists(input_file)
+        return path, False
+    else:
+        return None, False
+
+def get_download_url(filename):
+    host = "localhost"
+    port = 8001
+    return f"http://{host}:{port}/{filename}"
+
 # DOCX to PDF conversion tool
 @mcp.tool("docx2pdf")
 def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None) -> dict:
-    """
-    Convert a DOCX file to PDF format. Supports both file path and direct file content input.
-    
-    Args:
-        input_file: Path to the DOCX file to convert. Optional if providing file_content_base64.
-        file_content_base64: Base64 encoded content of the DOCX file. Optional if providing input_file.
-        
-    Returns:
-        Dictionary containing success status and either base64 encoded PDF or error message.
-    """
     try:
-        logger.info(f"Starting DOCX to PDF conversion")
-        logger.info(f"Received parameters: input_file={input_file}, file_content_base64={'[BASE64 content]' if file_content_base64 else 'None'}")
-        
-        # Log more debug information
-        if input_file:
-            logger.info(f"Input file type: {type(input_file)}")
-            logger.info(f"Input file length: {len(input_file) if isinstance(input_file, str) else 'not a string'}")
-            logger.info(f"Input file first 20 chars: {input_file[:20] if isinstance(input_file, str) else 'not a string'}")
-        
-        # Validate that at least one input method is provided
         if input_file is None and file_content_base64 is None:
-            logger.error("No input provided: both input_file and file_content_base64 are None")
-            return debug_json_response(format_error_response("You must provide either input_file or file_content_base64"))
-        
-        # Create temporary directory for processing files
+            return {"success": False, "error": "You must provide either input_file or file_content_base64"}
         temp_dir = tempfile.mkdtemp()
-        logger.info(f"Created temporary directory: {temp_dir}")
-        
-        # Create a unique filename with timestamp
         temp_input_file = os.path.join(temp_dir, f"input_{int(time.time())}.docx")
         temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.pdf")
-        
-        # Handle direct content mode
+        is_temp_url = False
         if file_content_base64:
-            logger.info("Using direct content mode (base64 input)")
             try:
-                # Decode base64 content
                 file_content = base64.b64decode(file_content_base64)
-                
-                # Write to temporary file
                 with open(temp_input_file, "wb") as f:
                     f.write(file_content)
-                logger.info(f"Successfully wrote input file from base64: {temp_input_file}")
-                
-                # Set actual file path to our temporary file
                 actual_file_path = temp_input_file
             except Exception as e:
-                logger.error(f"Failed to decode or write base64 input: {str(e)}")
-                return debug_json_response(format_error_response(f"Error processing input file content: {str(e)}"))
-                
-        # Handle file path mode
+                import shutil
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
-            logger.info(f"Using file path mode with input: {input_file}")
-            
-            # List files in current directory for debugging
             try:
-                current_files = os.listdir(".")
-                logger.info(f"Files in current directory: {current_files}")
+                actual_file_path, is_temp_url = handle_input_file_with_url(input_file, ".docx")
+                if not actual_file_path:
+                    raise ValueError("File path could not be resolved from input_file")
             except Exception as e:
-                logger.warning(f"Error listing files in current directory: {str(e)}")
-            
-            # Try to locate the file
-            try:
-                actual_file_path = validate_file_exists(input_file, ".docx")
-                logger.info(f"File validated, using path: {actual_file_path}")
-            except Exception as e:
-                logger.error(f"File validation error: {str(e)}")
-                
-                # Clean up temp directory before returning
-                try:
-                    import shutil
-                    shutil.rmtree(temp_dir)
-                except:
-                    pass
-                    
-                return debug_json_response(format_error_response(f"Error finding DOCX file: {str(e)}"))
-        
-        # Import docx2pdf here to avoid dependency if not needed
+                import shutil
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"Error finding DOCX file: {str(e)}"}
         try:
             from docx2pdf import convert
-            logger.info("Successfully imported docx2pdf")
-        except ImportError as e:
-            logger.error(f"Failed to import docx2pdf: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response("Error importing docx2pdf library. Please ensure it's installed."))
-        
-        # Perform conversion
-        logger.info(f"Starting conversion from {actual_file_path} to {temp_output_file}")
-        try:
             convert(actual_file_path, temp_output_file)
-            logger.info("Conversion completed successfully")
         except Exception as e:
-            logger.error(f"Conversion error: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Error during DOCX to PDF conversion: {str(e)}"))
-        
-        # Verify the output file exists
-        if not os.path.exists(temp_output_file):
-            logger.error(f"Output file not found after conversion: {temp_output_file}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Conversion failed: Output file not found"))
-        
-        # Return base64 encoded PDF
-        logger.info("Encoding PDF file as base64")
-        try:
-            encoded_data = get_base64_encoded_file(temp_output_file)
-            logger.info("Successfully encoded PDF file")
-            
-            # Clean up temp directory
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-                logger.info(f"Cleaned up temporary directory: {temp_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to clean up temporary directory: {str(e)}")
-                
-            return debug_json_response(format_success_response(encoded_data))
-        except Exception as e:
-            logger.error(f"Error encoding PDF file: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Error reading converted PDF file: {str(e)}"))
+            import shutil
+            shutil.rmtree(temp_dir)
+            if is_temp_url:
+                try: os.remove(actual_file_path)
+                except: pass
+            return {"success": False, "error": f"Error converting DOCX to PDF: {str(e)}"}
+        import shutil
+        output_file = f"output_{int(time.time())}.pdf"
+        shutil.move(temp_output_file, output_file)
+        shutil.rmtree(temp_dir)
+        if is_temp_url:
+            try: os.remove(actual_file_path)
+            except: pass
+        return {"success": True, "output_file": output_file, "download_url": get_download_url(output_file)}
     
     except Exception as e:
         logger.error(f"Unexpected error in convert_docx_to_pdf: {str(e)}")
@@ -426,150 +357,58 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
 def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None) -> dict:
     """
     Convert a PDF file to DOCX format. Supports both file path and direct file content input.
-    
-    Args:
-        input_file: Path to the PDF file to convert. Optional if providing file_content_base64.
-        file_content_base64: Base64 encoded content of the PDF file. Optional if providing input_file.
-        
-    Returns:
-        Dictionary containing success status and either base64 encoded DOCX or error message.
     """
     try:
         logger.info(f"Starting PDF to DOCX conversion")
-        
-        # Validate that at least one input method is provided
         if input_file is None and file_content_base64 is None:
             logger.error("No input provided: both input_file and file_content_base64 are None")
-            return debug_json_response(format_error_response("You must provide either input_file or file_content_base64"))
-        
-        # Create temporary directory for processing files
+            return {"success": False, "error": "You must provide either input_file or file_content_base64"}
         temp_dir = tempfile.mkdtemp()
-        logger.info(f"Created temporary directory: {temp_dir}")
-        
-        # Create a unique filename with timestamp
         temp_input_file = os.path.join(temp_dir, f"input_{int(time.time())}.pdf")
         temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
-        
+        is_temp_url = False
         # Handle direct content mode
         if file_content_base64:
-            logger.info("Using direct content mode (base64 input)")
             try:
-                # Decode base64 content
                 file_content = base64.b64decode(file_content_base64)
-                
-                # Write to temporary file
                 with open(temp_input_file, "wb") as f:
                     f.write(file_content)
-                logger.info(f"Successfully wrote input file from base64: {temp_input_file}")
-                
-                # Set actual file path to our temporary file
                 actual_file_path = temp_input_file
             except Exception as e:
-                logger.error(f"Failed to decode or write base64 input: {str(e)}")
-                
-                # Clean up temp directory before returning
-                try:
-                    import shutil
-                    shutil.rmtree(temp_dir)
-                except:
-                    pass
-                    
-                return debug_json_response(format_error_response(f"Error processing input file content: {str(e)}"))
-                
-        # Handle file path mode
+                import shutil
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
-            logger.info(f"Using file path mode with input: {input_file}")
-            
-            # Try to locate the file
             try:
-                actual_file_path = validate_file_exists(input_file, ".pdf")
-                logger.info(f"File validated, using path: {actual_file_path}")
+                actual_file_path, is_temp_url = handle_input_file_with_url(input_file, ".pdf")
+                if not actual_file_path:
+                    raise ValueError("File path could not be resolved from input_file")
             except Exception as e:
-                logger.error(f"File validation error: {str(e)}")
-                
-                # Clean up temp directory before returning
-                try:
-                    import shutil
-                    shutil.rmtree(temp_dir)
-                except:
-                    pass
-                    
-                return debug_json_response(format_error_response(f"Error finding PDF file: {str(e)}"))
-        
-        # Import pdf2docx here to avoid dependency if not needed
+                import shutil
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"Error finding PDF file: {str(e)}"}
+        # 执行转换
         try:
             from pdf2docx import Converter
-            logger.info("Successfully imported pdf2docx")
-        except ImportError as e:
-            logger.error(f"Failed to import pdf2docx: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response("Error importing pdf2docx library. Please ensure it's installed."))
-        
-        # Perform conversion
-        logger.info(f"Starting conversion from {actual_file_path} to {temp_output_file}")
-        try:
             cv = Converter(actual_file_path)
-            cv.convert(temp_output_file)
+            cv.convert(temp_output_file, start=0, end=-1)
             cv.close()
-            logger.info("Conversion completed successfully")
         except Exception as e:
-            logger.error(f"Conversion error: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Error during PDF to DOCX conversion: {str(e)}"))
-        
-        # Verify the output file exists
-        if not os.path.exists(temp_output_file):
-            logger.error(f"Output file not found after conversion: {temp_output_file}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Conversion failed: Output file not found"))
-        
-        # Return base64 encoded DOCX
-        logger.info("Encoding DOCX file as base64")
-        try:
-            encoded_data = get_base64_encoded_file(temp_output_file)
-            logger.info("Successfully encoded DOCX file")
-            
-            # Clean up temp directory
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-                logger.info(f"Cleaned up temporary directory: {temp_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to clean up temporary directory: {str(e)}")
-                
-            return debug_json_response(format_success_response(encoded_data))
-        except Exception as e:
-            logger.error(f"Error encoding DOCX file: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Error reading converted DOCX file: {str(e)}"))
+            import shutil
+            shutil.rmtree(temp_dir)
+            if is_temp_url:
+                try: os.remove(actual_file_path)
+                except: pass
+            return {"success": False, "error": f"Error converting PDF to DOCX: {str(e)}"}
+        # 移动输出文件到当前目录
+        import shutil
+        output_file = f"output_{int(time.time())}.docx"
+        shutil.move(temp_output_file, output_file)
+        shutil.rmtree(temp_dir)
+        if is_temp_url:
+            try: os.remove(actual_file_path)
+            except: pass
+        return {"success": True, "output_file": output_file, "download_url": get_download_url(output_file)}
     
     except Exception as e:
         logger.error(f"Unexpected error in convert_pdf_to_docx: {str(e)}")
@@ -578,191 +417,65 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
 # Image format conversion tool
 @mcp.tool("convert_image")
 def convert_image(input_file: str = None, file_content_base64: str = None, output_format: str = None, input_format: str = None) -> dict:
-    """
-    Convert an image file to another format. Supports both file path and direct file content input.
-    
-    Args:
-        input_file: Path to the image file to convert. Optional if providing file_content_base64.
-        file_content_base64: Base64 encoded content of the image file. Optional if providing input_file.
-        output_format: Target format (e.g., "png", "jpg", "webp").
-        input_format: Source format (e.g., "png", "jpg"). Only required when using file_content_base64.
-        
-    Returns:
-        Dictionary containing success status and either base64 encoded image or error message.
-    """
     try:
-        logger.info(f"Starting image conversion to {output_format}")
-        
-        # Validate that at least one input method is provided
         if input_file is None and file_content_base64 is None:
-            logger.error("No input provided: both input_file and file_content_base64 are None")
-            return debug_json_response(format_error_response("You must provide either input_file or file_content_base64"))
-            
-        # Check if output format is valid
+            return {"success": False, "error": "You must provide either input_file or file_content_base64"}
         valid_formats = ["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff"]
         if not output_format or output_format.lower() not in valid_formats:
-            logger.error(f"Invalid output format: {output_format}")
-            return debug_json_response(format_error_response(f"Unsupported output format: {output_format}. Supported formats: {', '.join(valid_formats)}"))
-        
-        # Create temporary directory for processing files
+            return {"success": False, "error": f"Unsupported output format: {output_format}. Supported formats: {', '.join(valid_formats)}"}
         temp_dir = tempfile.mkdtemp()
-        logger.info(f"Created temporary directory: {temp_dir}")
-        
-        # Handle direct content mode
+        is_temp_url = False
         if file_content_base64:
-            logger.info("Using direct content mode (base64 input)")
-            
-            # Need input format when using content mode
             if not input_format:
-                logger.error("input_format is required when using file_content_base64")
-                
-                # Clean up temp directory before returning
-                try:
-                    import shutil
-                    shutil.rmtree(temp_dir)
-                except:
-                    pass
-                    
-                return debug_json_response(format_error_response("input_format is required when using file_content_base64"))
-                
-            # Create a unique filename with timestamp
-            temp_input_file = os.path.join(temp_dir, f"input_{int(time.time())}.{input_format.lower()}")
-            temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.{output_format.lower()}")
-            
-            try:
-                # Decode base64 content
-                file_content = base64.b64decode(file_content_base64)
-                
-                # Write to temporary file
-                with open(temp_input_file, "wb") as f:
-                    f.write(file_content)
-                logger.info(f"Successfully wrote input file from base64: {temp_input_file}")
-                
-                # Set actual file path to our temporary file
-                actual_file_path = temp_input_file
-            except Exception as e:
-                logger.error(f"Failed to decode or write base64 input: {str(e)}")
-                
-                # Clean up temp directory before returning
-                try:
-                    import shutil
-                    shutil.rmtree(temp_dir)
-                except:
-                    pass
-                    
-                return debug_json_response(format_error_response(f"Error processing input file content: {str(e)}"))
-                
-        # Handle file path mode
-        else:
-            logger.info(f"Using file path mode with input: {input_file}")
-            
-            # Try to locate the file
-            try:
-                actual_file_path = validate_file_exists(input_file)
-                logger.info(f"File validated, using path: {actual_file_path}")
-                
-                # Detect input format from file extension if not explicitly provided
-                if not input_format:
-                    input_format = os.path.splitext(actual_file_path)[1].lstrip('.')
-                    logger.info(f"Detected input format from file extension: {input_format}")
-                
-                # Create output file path
-                temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.{output_format.lower()}")
-            except Exception as e:
-                logger.error(f"File validation error: {str(e)}")
-                
-                # Clean up temp directory before returning
-                try:
-                    import shutil
-                    shutil.rmtree(temp_dir)
-                except:
-                    pass
-                    
-                return debug_json_response(format_error_response(f"Error finding input image file: {str(e)}"))
-        
-        # Import PIL here to avoid dependency if not needed
-        try:
-            from PIL import Image
-            logger.info("Successfully imported PIL")
-        except ImportError as e:
-            logger.error(f"Failed to import PIL: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
                 import shutil
                 shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response("Error importing PIL library. Please ensure pillow is installed."))
-        
-        # Perform conversion
-        logger.info(f"Starting image conversion from {actual_file_path} to {temp_output_file}")
+                return {"success": False, "error": "input_format is required when using file_content_base64"}
+            temp_input_file = os.path.join(temp_dir, f"input_{int(time.time())}.{input_format.lower()}")
+            temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.{output_format.lower()}")
+            try:
+                file_content = base64.b64decode(file_content_base64)
+                with open(temp_input_file, "wb") as f:
+                    f.write(file_content)
+                actual_file_path = temp_input_file
+            except Exception as e:
+                import shutil
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"Error processing input file content: {str(e)}"}
+        else:
+            try:
+                actual_file_path, is_temp_url = handle_input_file_with_url(input_file)
+                if not actual_file_path:
+                    raise ValueError("File path could not be resolved from input_file")
+                input_format = os.path.splitext(actual_file_path)[1].lstrip('.') if not input_format else input_format
+                temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.{output_format.lower()}")
+            except Exception as e:
+                import shutil
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"Error finding input image file: {str(e)}"}
         try:
+            from PIL import Image
             img = Image.open(actual_file_path)
-            
-            # Handle special cases for certain formats
             if output_format.lower() in ['jpg', 'jpeg']:
-                # Convert to RGB if saving as JPEG (removes alpha channel)
                 if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-                    logger.info("Converting image to RGB for JPEG output")
                     background = Image.new("RGB", img.size, (255, 255, 255))
                     background.paste(img, mask=img.split()[3] if img.mode == 'RGBA' else None)
                     img = background
-            
             img.save(temp_output_file)
-            logger.info("Conversion completed successfully")
         except Exception as e:
-            logger.error(f"Conversion error: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Error during image conversion: {str(e)}"))
-        
-        # Verify the output file exists
-        if not os.path.exists(temp_output_file):
-            logger.error(f"Output file not found after conversion: {temp_output_file}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Conversion failed: Output file not found"))
-        
-        # Return base64 encoded image
-        logger.info("Encoding output image as base64")
-        try:
-            encoded_data = get_base64_encoded_file(temp_output_file)
-            logger.info("Successfully encoded output image")
-            
-            # Clean up temp directory
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-                logger.info(f"Cleaned up temporary directory: {temp_dir}")
-            except Exception as e:
-                logger.warning(f"Failed to clean up temporary directory: {str(e)}")
-                
-            return debug_json_response(format_success_response(encoded_data))
-        except Exception as e:
-            logger.error(f"Error encoding output image: {str(e)}")
-            
-            # Clean up temp directory before returning
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except:
-                pass
-                
-            return debug_json_response(format_error_response(f"Error reading converted image file: {str(e)}"))
+            import shutil
+            shutil.rmtree(temp_dir)
+            if is_temp_url:
+                try: os.remove(actual_file_path)
+                except: pass
+            return {"success": False, "error": f"Error during image conversion: {str(e)}"}
+        import shutil
+        output_file = f"output_{int(time.time())}.{output_format.lower()}"
+        shutil.move(temp_output_file, output_file)
+        shutil.rmtree(temp_dir)
+        if is_temp_url:
+            try: os.remove(actual_file_path)
+            except: pass
+        return {"success": True, "output_file": output_file, "download_url": get_download_url(output_file)}
     
     except Exception as e:
         logger.error(f"Unexpected error in convert_image: {str(e)}")
@@ -771,175 +484,74 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
 # Excel to CSV conversion tool
 @mcp.tool("excel2csv")
 def convert_excel_to_csv(input_file: str) -> dict:
-    """
-    Convert an Excel file (XLS/XLSX) to CSV format.
-    
-    Args:
-        input_file: Path to the Excel file to convert.
-        
-    Returns:
-        Dictionary containing success status and either base64 encoded CSV or error message.
-    """
     try:
-        # Validate input file
-        if not input_file.lower().endswith(('.xls', '.xlsx')):
-            raise ValueError(f"File must be an Excel file (.xls or .xlsx), got: {input_file}")
-        actual_file_path = validate_file_exists(input_file)
-        
-        # Generate output file path
-        output_file = os.path.splitext(actual_file_path)[0] + ".csv"
-        
-        # Import pandas here to avoid dependency if not needed
+        if not input_file.lower().endswith((".xls", ".xlsx")):
+            return {"success": False, "error": f"File must be an Excel file (.xls or .xlsx), got: {input_file}"}
+        actual_file_path, is_temp_url = handle_input_file_with_url(input_file)
+        output_file = f"output_{int(time.time())}.csv"
         import pandas as pd
-        
-        # Perform conversion
         df = pd.read_excel(actual_file_path)
         df.to_csv(output_file, index=False)
-        
-        # Return base64 encoded CSV
-        return debug_json_response(format_success_response(get_base64_encoded_file(output_file)))
-    
+        if is_temp_url:
+            try: os.remove(actual_file_path)
+            except: pass
+        return {"success": True, "output_file": output_file, "download_url": get_download_url(output_file)}
     except Exception as e:
-        return debug_json_response(format_error_response(f"Error converting Excel to CSV: {str(e)}"))
+        return {"success": False, "error": f"Error converting Excel to CSV: {str(e)}"}
 
 # HTML to PDF conversion tool
 @mcp.tool("html2pdf")
 def convert_html_to_pdf(input_file: str) -> dict:
-    """
-    Convert an HTML file to PDF format.
-    
-    Args:
-        input_file: Path to the HTML file to convert.
-        
-    Returns:
-        Dictionary containing success status and either base64 encoded PDF or error message.
-    """
     try:
-        # Validate input file - for HTML, be more flexible with extensions
-        # since we might be handling Markdown files too
-        actual_file_path = validate_file_exists(input_file)
-        
-        # Determine if this is Markdown and convert to HTML first if needed
-        if actual_file_path.lower().endswith(('.md', '.markdown')):
-            # Import markdown module if needed
-            try:
-                import markdown
-                with open(actual_file_path, 'r', encoding='utf-8') as md_file:
-                    md_content = md_file.read()
-                
-                html_content = markdown.markdown(md_content)
-                
-                # Create a temporary HTML file
-                html_temp = os.path.splitext(actual_file_path)[0] + '.temp.html'
-                with open(html_temp, 'w', encoding='utf-8') as html_file:
-                    html_file.write(f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <title>Converted Markdown</title>
-                        <style>
-                            body {{ font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }}
-                            h1, h2, h3, h4, h5, h6 {{ color: #333; margin-top: 24px; }}
-                            code {{ background-color: #f0f0f0; padding: 2px 4px; border-radius: 3px; }}
-                            pre {{ background-color: #f0f0f0; padding: 10px; border-radius: 5px; overflow-x: auto; }}
-                            blockquote {{ border-left: 4px solid #ddd; padding-left: 16px; margin-left: 0; }}
-                            img {{ max-width: 100%; }}
-                            table {{ border-collapse: collapse; width: 100%; }}
-                            th, td {{ border: 1px solid #ddd; padding: 8px; }}
-                            tr:nth-child(even) {{ background-color: #f2f2f2; }}
-                        </style>
-                    </head>
-                    <body>
-                        {html_content}
-                    </body>
-                    </html>
-                    """)
-                
-                actual_file_path = html_temp
-            except ImportError:
-                raise ValueError("Markdown conversion requires the 'markdown' module. Please install it with 'pip install markdown'")
-        
-        # Generate output file path
-        output_file = os.path.splitext(os.path.splitext(actual_file_path)[0])[0] + ".pdf"
-        if actual_file_path.endswith('.temp.html'):
-            output_file = os.path.splitext(os.path.splitext(actual_file_path)[0])[0] + ".pdf"
-        
-        # Import here to avoid dependency if not needed
+        actual_file_path, is_temp_url = handle_input_file_with_url(input_file)
+        output_file = f"output_{int(time.time())}.pdf"
+        if actual_file_path.lower().endswith((".md", ".markdown")):
+            import markdown
+            with open(actual_file_path, 'r', encoding='utf-8') as md_file:
+                md_content = md_file.read()
+            html_content = markdown.markdown(md_content)
+            html_temp = os.path.splitext(actual_file_path)[0] + '.temp.html'
+            with open(html_temp, 'w', encoding='utf-8') as f:
+                f.write(f"""
+                <html><head><meta charset='utf-8'></head><body>{html_content}</body></html>
+                """)
+            actual_file_path = html_temp
         import pdfkit
-        
-        # Perform conversion
         pdfkit.from_file(actual_file_path, output_file)
-        
-        # Remove temporary file if it was created
         if actual_file_path.endswith('.temp.html'):
-            try:
-                os.remove(actual_file_path)
-            except:
-                pass
-        
-        # Return base64 encoded PDF
-        return debug_json_response(format_success_response(get_base64_encoded_file(output_file)))
-    
+            try: os.remove(actual_file_path)
+            except: pass
+        if is_temp_url:
+            try: os.remove(actual_file_path)
+            except: pass
+        return {"success": True, "output_file": output_file, "download_url": get_download_url(output_file)}
     except Exception as e:
-        return debug_json_response(format_error_response(f"Error converting HTML to PDF: {str(e)}"))
+        return {"success": False, "error": f"Error converting HTML/Markdown to PDF: {str(e)}"}
 
 # Generic file conversion tool using file paths
 @mcp.tool("convert_file")
 def convert_file(input_file: str = None, file_content_base64: str = None, input_format: str = None, output_format: str = None, ctx: Context = None) -> dict:
-    """
-    Generic file conversion tool that attempts to convert between various formats.
-    Supports both file path and direct file content input.
-    
-    Args:
-        input_file: Path to the file to convert. Optional if providing file_content_base64.
-        file_content_base64: Base64 encoded content of the file. Optional if providing input_file.
-        input_format: Source format (e.g., "docx", "pdf", "png").
-        output_format: Target format (e.g., "pdf", "docx", "jpg").
-        ctx: Optional context object for progress reporting.
-        
-    Returns:
-        Dictionary containing success status and either base64 encoded file or error message.
-    """
     try:
-        # Log progress if context is provided
         if ctx:
             ctx.info(f"Converting from {input_format} to {output_format}")
-        
-        logger.info(f"Starting generic file conversion from {input_format} to {output_format}")
-        
-        # Validate that at least one input method is provided
         if input_file is None and file_content_base64 is None:
-            logger.error("No input provided: both input_file and file_content_base64 are None")
-            return debug_json_response(format_error_response("You must provide either input_file or file_content_base64"))
-            
-        # Check that formats are specified
+            return {"success": False, "error": "You must provide either input_file or file_content_base64"}
         if not input_format or not output_format:
-            logger.error(f"Missing format specification: input_format={input_format}, output_format={output_format}")
-            return debug_json_response(format_error_response("You must specify both input_format and output_format"))
-            
-        # Define conversion mapping: {(source_format, target_format): conversion_function}
+            return {"success": False, "error": "You must specify both input_format and output_format"}
         conversion_map = {
             ("docx", "pdf"): convert_docx_to_pdf,
             ("pdf", "docx"): convert_pdf_to_docx,
             ("markdown", "pdf"): convert_html_to_pdf,
             ("md", "pdf"): convert_html_to_pdf,
-            # Additional format conversions can be added here
         }
-            
-        # Look up the appropriate conversion function
         conversion_key = (input_format.lower(), output_format.lower())
         if conversion_key in conversion_map:
-            # Call the specific conversion function with the correct parameters
             conversion_func = conversion_map[conversion_key]
-            
-            # Check if the function accepts file_content_base64 parameter (our updated ones do)
             if file_content_base64:
                 return conversion_func(file_content_base64=file_content_base64)
             else:
                 return conversion_func(input_file=input_file)
         else:
-            # For image conversions
             if input_format.lower() in ["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff"]:
                 if file_content_base64:
                     return convert_image(
@@ -952,14 +564,9 @@ def convert_file(input_file: str = None, file_content_base64: str = None, input_
                         input_file=input_file,
                         output_format=output_format
                     )
-            
-            # If we got here, the conversion is not supported
-            logger.error(f"Unsupported conversion: {input_format} to {output_format}")
-            return debug_json_response(format_error_response(f"Unsupported conversion: {input_format} to {output_format}"))
-    
+            return {"success": False, "error": f"Unsupported conversion: {input_format} to {output_format}"}
     except Exception as e:
-        logger.error(f"Unexpected error in convert_file: {str(e)}")
-        return debug_json_response(format_error_response(f"Error converting file: {str(e)}"))
+        return {"success": False, "error": f"Error converting file: {str(e)}"}
 
 # Function to handle direct file content input
 @mcp.tool("convert_content")
@@ -1037,4 +644,5 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
     return debug_json_response(result)
 
 if __name__ == "__main__":
+    mcp.run() 
     mcp.run() 

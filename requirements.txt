@@ -6,4 +6,5 @@ pandas
 pdfkit
 markdown
 fastapi
-uvicorn 
+uvicorn
+requests 
