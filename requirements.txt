@@ -6,3 +6,4 @@ pandas
 pdfkit
 markdown
 requests 
+paramiko 
