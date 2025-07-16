@@ -324,7 +324,9 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
             try:
                 input_file = download_url_to_tempfile(input_file, ".docx")
                 temp_files.append(input_file)
+                logger.info(f"已下载DOCX到临时文件: {input_file}, 大小: {os.path.getsize(input_file) if os.path.exists(input_file) else '不存在'} 字节")
             except Exception as e:
+                logger.error(f"下载DOCX失败: {str(e)}")
                 return {"success": False, "error": f"Error downloading file from URL: {str(e)}"}
         if input_file is None and file_content_base64 is None:
             return {"success": False, "error": "You must provide either input_file or file_content_base64"}
@@ -338,9 +340,11 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
                 with open(temp_input_file, "wb") as f:
                     f.write(file_content)
                 actual_file_path = temp_input_file
+                logger.info(f"已写入base64 DOCX到临时文件: {temp_input_file}, 大小: {os.path.getsize(temp_input_file)} 字节")
             except Exception as e:
                 import shutil
                 shutil.rmtree(temp_dir)
+                logger.error(f"写入base64 DOCX失败: {str(e)}")
                 return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
             try:
@@ -350,20 +354,31 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
                 shutil.rmtree(temp_dir)
                 for f in temp_files:
                     os.remove(f)
+                logger.error(f"查找DOCX文件失败: {str(e)}")
                 return {"success": False, "error": f"Error finding DOCX file: {str(e)}"}
         try:
             from docx2pdf import convert
+            logger.info(f"开始转换: {actual_file_path} -> {temp_output_file}")
             convert(actual_file_path, temp_output_file)
         except Exception as e:
             import shutil
             shutil.rmtree(temp_dir)
             for f in temp_files:
                 os.remove(f)
+            logger.error(f"DOCX转换异常: {str(e)}")
             return {"success": False, "error": f"Error converting DOCX to PDF: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
         logger.info(f"准备保存输出文件到: {output_file}")
-        shutil.move(temp_output_file, output_file)
+        try:
+            shutil.move(temp_output_file, output_file)
+            logger.info(f"已成功保存输出文件到: {output_file}")
+        except Exception as e:
+            logger.error(f"移动输出文件失败: {str(e)}")
+            shutil.rmtree(temp_dir)
+            for f in temp_files:
+                os.remove(f)
+            return {"success": False, "error": f"Error moving output file: {str(e)}"}
         shutil.rmtree(temp_dir)
         for f in temp_files:
             os.remove(f)
@@ -386,7 +401,9 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             try:
                 input_file = download_url_to_tempfile(input_file, ".pdf")
                 temp_files.append(input_file)
+                logger.info(f"已下载PDF到临时文件: {input_file}, 大小: {os.path.getsize(input_file) if os.path.exists(input_file) else '不存在'} 字节")
             except Exception as e:
+                logger.error(f"下载PDF失败: {str(e)}")
                 return {"success": False, "error": f"Error downloading file from URL: {str(e)}"}
         if input_file is None and file_content_base64 is None:
             logger.error("No input provided: both input_file and file_content_base64 are None")
@@ -402,9 +419,11 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
                 with open(temp_input_file, "wb") as f:
                     f.write(file_content)
                 actual_file_path = temp_input_file
+                logger.info(f"已写入base64 PDF到临时文件: {temp_input_file}, 大小: {os.path.getsize(temp_input_file)} 字节")
             except Exception as e:
                 import shutil
                 shutil.rmtree(temp_dir)
+                logger.error(f"写入base64 PDF失败: {str(e)}")
                 return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
             try:
@@ -412,14 +431,18 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             except Exception as e:
                 import shutil
                 shutil.rmtree(temp_dir)
+                for f in temp_files:
+                    os.remove(f)
+                logger.error(f"查找PDF文件失败: {str(e)}")
                 return {"success": False, "error": f"Error finding PDF file: {str(e)}"}
         # 执行转换
         try:
             from pdf2docx import Converter
+            logger.info(f"开始转换: {actual_file_path} -> {temp_output_file}")
             cv = Converter(actual_file_path)
             cv.convert(temp_output_file, start=0, end=-1)
             cv.close()
-            logger.info(f"转换完成，检查临时输出文件是否存在: {temp_output_file}")
+            logger.info(f"转换完成，检查临时输出文件是否存在: {temp_output_file}, 存在: {os.path.exists(temp_output_file)}")
             if not os.path.exists(temp_output_file):
                 logger.error(f"转换失败，未生成临时输出文件: {temp_output_file}")
                 import shutil
@@ -432,11 +455,20 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             shutil.rmtree(temp_dir)
             for f in temp_files:
                 os.remove(f)
+            logger.error(f"PDF转换异常: {str(e)}")
             return {"success": False, "error": f"Error converting PDF to DOCX: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.docx"
         logger.info(f"准备保存输出文件到: {output_file}")
-        shutil.move(temp_output_file, output_file)
+        try:
+            shutil.move(temp_output_file, output_file)
+            logger.info(f"已成功保存输出文件到: {output_file}")
+        except Exception as e:
+            logger.error(f"移动输出文件失败: {str(e)}")
+            shutil.rmtree(temp_dir)
+            for f in temp_files:
+                os.remove(f)
+            return {"success": False, "error": f"Error moving output file: {str(e)}"}
         shutil.rmtree(temp_dir)
         for f in temp_files:
             os.remove(f)
@@ -456,7 +488,9 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
                 suffix = f".{input_format.lower()}" if input_format else ".img"
                 input_file = download_url_to_tempfile(input_file, suffix)
                 temp_files.append(input_file)
+                logger.info(f"已下载图片到临时文件: {input_file}, 大小: {os.path.getsize(input_file) if os.path.exists(input_file) else '不存在'} 字节")
             except Exception as e:
+                logger.error(f"下载图片失败: {str(e)}")
                 return {"success": False, "error": f"Error downloading image from URL: {str(e)}"}
         if input_file is None and file_content_base64 is None:
             return {"success": False, "error": "You must provide either input_file or file_content_base64"}
@@ -476,11 +510,13 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
                 with open(temp_input_file, "wb") as f:
                     f.write(file_content)
                 actual_file_path = temp_input_file
+                logger.info(f"已写入base64图片到临时文件: {temp_input_file}, 大小: {os.path.getsize(temp_input_file)} 字节")
             except Exception as e:
                 import shutil
                 shutil.rmtree(temp_dir)
                 for f in temp_files:
                     os.remove(f)
+                logger.error(f"写入base64图片失败: {str(e)}")
                 return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
             try:
@@ -492,6 +528,7 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
                 shutil.rmtree(temp_dir)
                 for f in temp_files:
                     os.remove(f)
+                logger.error(f"查找输入图片文件失败: {str(e)}")
                 return {"success": False, "error": f"Error finding input image file: {str(e)}"}
         try:
             from PIL import Image
@@ -507,11 +544,20 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
             shutil.rmtree(temp_dir)
             for f in temp_files:
                 os.remove(f)
+            logger.error(f"图片转换异常: {str(e)}")
             return {"success": False, "error": f"Error during image conversion: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.{output_format.lower()}"
         logger.info(f"准备保存输出文件到: {output_file}")
-        shutil.move(temp_output_file, output_file)
+        try:
+            shutil.move(temp_output_file, output_file)
+            logger.info(f"已成功保存输出文件到: {output_file}")
+        except Exception as e:
+            logger.error(f"移动输出文件失败: {str(e)}")
+            shutil.rmtree(temp_dir)
+            for f in temp_files:
+                os.remove(f)
+            return {"success": False, "error": f"Error moving output file: {str(e)}"}
         shutil.rmtree(temp_dir)
         for f in temp_files:
             os.remove(f)
@@ -529,7 +575,9 @@ def convert_excel_to_csv(input_file: str) -> dict:
             try:
                 input_file = download_url_to_tempfile(input_file, ".xlsx")
                 temp_files.append(input_file)
+                logger.info(f"已下载Excel到临时文件: {input_file}, 大小: {os.path.getsize(input_file) if os.path.exists(input_file) else '不存在'} 字节")
             except Exception as e:
+                logger.error(f"下载Excel失败: {str(e)}")
                 return {"success": False, "error": f"Error downloading excel from URL: {str(e)}"}
         if not input_file.lower().endswith((".xls", ".xlsx")):
             return {"success": False, "error": f"File must be an Excel file (.xls or .xlsx), got: {input_file}"}
@@ -542,6 +590,7 @@ def convert_excel_to_csv(input_file: str) -> dict:
             os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
+        logger.error(f"下载Excel失败: {str(e)}")
         return {"success": False, "error": f"Error converting Excel to CSV: {str(e)}"}
 
 # HTML to PDF conversion tool
@@ -554,7 +603,9 @@ def convert_html_to_pdf(input_file: str) -> dict:
                 # 默认按.html后缀下载
                 input_file = download_url_to_tempfile(input_file, ".html")
                 temp_files.append(input_file)
+                logger.info(f"已下载HTML到临时文件: {input_file}, 大小: {os.path.getsize(input_file) if os.path.exists(input_file) else '不存在'} 字节")
             except Exception as e:
+                logger.error(f"下载HTML失败: {str(e)}")
                 return {"success": False, "error": f"Error downloading html from URL: {str(e)}"}
         actual_file_path = input_file
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
@@ -578,6 +629,7 @@ def convert_html_to_pdf(input_file: str) -> dict:
             os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
+        logger.error(f"下载HTML失败: {str(e)}")
         return {"success": False, "error": f"Error converting HTML/Markdown to PDF: {str(e)}"}
 
 # Generic file conversion tool using file paths
@@ -618,6 +670,7 @@ def convert_file(input_file: str = None, file_content_base64: str = None, input_
                     )
             return {"success": False, "error": f"Unsupported conversion: {input_format} to {output_format}"}
     except Exception as e:
+        logger.error(f"下载文件失败: {str(e)}")
         return {"success": False, "error": f"Error converting file: {str(e)}"}
 
 # Function to handle direct file content input
@@ -647,7 +700,7 @@ def convert_content(file_content_base64: str, input_format: str, output_format: 
         )
     
     except Exception as e:
-        logger.error(f"Unexpected error in convert_content: {str(e)}")
+        logger.error(f"下载内容失败: {str(e)}")
         return debug_json_response(format_error_response(f"Error converting content: {str(e)}"))
 
 # Direct DOCX to PDF conversion with content
@@ -678,6 +731,7 @@ def convert_pdf_to_docx_content(file_content_base64: str = None, input_file: str
             response.raise_for_status()
             file_content_base64 = base64.b64encode(response.content).decode('utf-8')
         except Exception as e:
+            logger.error(f"下载PDF内容失败: {str(e)}")
             return debug_json_response({"success": False, "error": f"Error downloading file from URL: {str(e)}"})
     if not file_content_base64:
         return debug_json_response({"success": False, "error": "No base64 content provided."})
