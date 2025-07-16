@@ -24,6 +24,7 @@ import sys
 import time
 import traceback
 import requests
+from typing import Optional
 
 # Set up logging
 logging.basicConfig(
@@ -629,36 +630,53 @@ def convert_excel_to_csv(input_file: str) -> dict:
 
 # HTML to PDF conversion tool
 @mcp.tool("html2pdf")
-def convert_html_to_pdf(input_file: str) -> dict:
+def convert_html_to_pdf(input_file: Optional[str] = None, html_content: Optional[str] = None) -> dict:
     try:
+        import tempfile, os, time, pdfkit, shutil
         temp_files = []
-        if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+        temp_dir = tempfile.mkdtemp()
+        temp_html_file = None
+        # 优先处理 html_content
+        if html_content is not None:
+            temp_html_file = os.path.join(temp_dir, f"input_{int(time.time())}.html")
+            with open(temp_html_file, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            actual_file_path = temp_html_file
+        elif input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
             try:
-                # 默认按.html后缀下载
                 input_file = download_url_to_tempfile(input_file, ".html")
                 temp_files.append(input_file)
                 logger.info(f"已下载HTML到临时文件: {input_file}, 大小: {os.path.getsize(input_file) if os.path.exists(input_file) else '不存在'} 字节")
             except Exception as e:
                 logger.error(f"下载HTML失败: {str(e)}")
+                shutil.rmtree(temp_dir)
                 return {"success": False, "error": f"Error downloading html from URL: {str(e)}"}
-        actual_file_path = input_file
+            actual_file_path = input_file
+        elif input_file:
+            actual_file_path = input_file
+        else:
+            shutil.rmtree(temp_dir)
+            return {"success": False, "error": "You must provide either input_file or html_content"}
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
+        # 支持 Markdown 文件路径
         if actual_file_path.lower().endswith((".md", ".markdown")):
             import markdown
             with open(actual_file_path, 'r', encoding='utf-8') as md_file:
                 md_content = md_file.read()
-            html_content = markdown.markdown(md_content)
+            html_content_md = markdown.markdown(md_content)
             html_temp = os.path.splitext(actual_file_path)[0] + '.temp.html'
             with open(html_temp, 'w', encoding='utf-8') as f:
                 f.write(f"""
-                <html><head><meta charset='utf-8'></head><body>{html_content}</body></html>
+                <html><head><meta charset='utf-8'></head><body>{html_content_md}</body></html>
                 """)
             actual_file_path = html_temp
-        import pdfkit
         pdfkit.from_file(actual_file_path, output_file)
         if actual_file_path.endswith('.temp.html'):
             try: os.remove(actual_file_path)
             except: pass
+        if temp_html_file and os.path.exists(temp_html_file):
+            os.remove(temp_html_file)
+        shutil.rmtree(temp_dir)
         for f in temp_files:
             os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
@@ -668,58 +686,41 @@ def convert_html_to_pdf(input_file: str) -> dict:
 
 # HTML to DOCX conversion tool (基于 Pandoc)
 @mcp.tool("html2docx")
-def convert_html_to_docx(input_file: str = None, file_content_base64: str = None) -> dict:
+def convert_html_to_docx(input_file: Optional[str] = None, html_content: Optional[str] = None) -> dict:
     """
-    Convert an HTML file to DOCX format using Pandoc. Supports file path, URL, and base64 content input.
+    Convert an HTML file to DOCX format using Pandoc. 支持文件路径、URL、明文HTML字符串输入。
     """
     import shutil
     import subprocess
+    import tempfile, os, time
     try:
         logger.info(f"Starting HTML to DOCX conversion")
         temp_files = []
-        # 如果input_file是URL，自动下载到临时文件
-        if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+        temp_dir = tempfile.mkdtemp()
+        temp_html_file = None
+        # 优先处理 html_content
+        if html_content is not None:
+            temp_html_file = os.path.join(temp_dir, f"input_{int(time.time())}.html")
+            with open(temp_html_file, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            actual_file_path = temp_html_file
+        elif input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
             try:
                 input_file = download_url_to_tempfile(input_file, ".html")
                 temp_files.append(input_file)
                 logger.info(f"已下载HTML到临时文件: {input_file}, 大小: {os.path.getsize(input_file) if os.path.exists(input_file) else '不存在'} 字节")
             except Exception as e:
                 logger.error(f"下载HTML失败: {str(e)}")
+                shutil.rmtree(temp_dir)
                 return {"success": False, "error": f"Error downloading HTML from URL: {str(e)}"}
-        if input_file is None and file_content_base64 is None:
-            logger.error("No input provided: both input_file and file_content_base64 are None")
-            return {"success": False, "error": "You must provide either input_file or file_content_base64"}
-        # 检查 input_file、file_content_base64 类型
-        if input_file is not None and not isinstance(input_file, str):
-            logger.error(f"input_file 类型错误: {type(input_file)}")
-            return {"success": False, "error": "input_file must be a string or None"}
-        if file_content_base64 is not None and not isinstance(file_content_base64, str):
-            logger.error(f"file_content_base64 类型错误: {type(file_content_base64)}")
-            return {"success": False, "error": "file_content_base64 must be a string or None"}
-        temp_dir = tempfile.mkdtemp()
-        temp_input_file = os.path.join(temp_dir, f"input_{int(time.time())}.html")
-        temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
-        # Handle direct content mode
-        if file_content_base64:
-            try:
-                file_content = base64.b64decode(file_content_base64)
-                with open(temp_input_file, "wb") as f:
-                    f.write(file_content)
-                actual_file_path = temp_input_file
-                logger.info(f"已写入base64 HTML到临时文件: {temp_input_file}, 大小: {os.path.getsize(temp_input_file)} 字节")
-            except Exception as e:
-                shutil.rmtree(temp_dir)
-                logger.error(f"写入base64 HTML失败: {str(e)}")
-                return {"success": False, "error": f"Error processing input file content: {str(e)}"}
+            actual_file_path = input_file
+        elif input_file:
+            actual_file_path = input_file
         else:
-            try:
-                actual_file_path = input_file
-            except Exception as e:
-                shutil.rmtree(temp_dir)
-                for f in temp_files:
-                    os.remove(f)
-                logger.error(f"查找HTML文件失败: {str(e)}")
-                return {"success": False, "error": f"Error finding HTML file: {str(e)}"}
+            shutil.rmtree(temp_dir)
+            logger.error("No input provided: both input_file and html_content are None")
+            return {"success": False, "error": "You must provide either input_file or html_content"}
+        temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
         # 执行 Pandoc 转换
         try:
             # 检查 pandoc 是否可用
@@ -791,6 +792,8 @@ def convert_html_to_docx(input_file: str = None, file_content_base64: str = None
             for f in temp_files:
                 os.remove(f)
             return {"success": False, "error": f"Error moving output file: {str(e)}"}
+        if temp_html_file and os.path.exists(temp_html_file):
+            os.remove(temp_html_file)
         shutil.rmtree(temp_dir)
         for f in temp_files:
             os.remove(f)
@@ -920,7 +923,7 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
     result = convert_file(file_content_base64=file_content_base64, input_format="md", output_format="pdf")
     return debug_json_response(result)
 
-# Markdown to PDF
+打完# Markdown to PDF
 @mcp.tool("markdown2pdf")
 def markdown2pdf(markdown_text: str) -> dict:
     import tempfile, os, time, shutil
