@@ -12,6 +12,7 @@ This project uses the following main dependencies:
 - `pdfkit` - HTML to PDF conversion
 - `markdown` - Markdown processing
 - `pandoc` (系统依赖) - HTML to DOCX conversion（html2docx功能需要）
+- WeasyPrint：用于 HTML 转 PDF（纯 Python，无需 wkhtmltopdf）
 
 ## Package Managers
 

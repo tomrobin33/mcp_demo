@@ -10,7 +10,7 @@
   - **PDF 转 DOCX**：将 PDF 文档转换为 Microsoft Word 格式
   - **图像格式转换**：在各种图像格式之间转换（JPG、PNG、WebP 等）
   - **Excel 转 CSV**：将 Excel 电子表格转换为 CSV 格式
-  - **HTML 转 PDF**：将 HTML 文件转换为 PDF 格式
+  - **HTML 转 PDF**：现已基于 WeasyPrint（纯 Python，无需 wkhtmltopdf，部署更简单）
   - **Markdown 转 PDF**：将 Markdown 文档转换为 PDF，并应用适当的样式
   - **通用转换**：一个多功能工具，可处理各种格式转换
 

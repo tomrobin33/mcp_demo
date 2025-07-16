@@ -9,3 +9,4 @@ pdfkit
 markdown
 requests 
 paramiko 
+weasyprint 

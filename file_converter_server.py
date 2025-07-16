@@ -25,6 +25,7 @@ import time
 import traceback
 import requests
 from typing import Optional
+from weasyprint import HTML
 
 # Set up logging
 logging.basicConfig(
@@ -632,57 +633,23 @@ def convert_excel_to_csv(input_file: str) -> dict:
 @mcp.tool("html2pdf")
 def convert_html_to_pdf(input_file: Optional[str] = None, html_content: Optional[str] = None) -> dict:
     try:
-        import tempfile, os, time, pdfkit, shutil
-        temp_files = []
+        import tempfile, os, time, shutil
         temp_dir = tempfile.mkdtemp()
-        temp_html_file = None
-        # 优先处理 html_content
+        output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
         if html_content is not None:
-            temp_html_file = os.path.join(temp_dir, f"input_{int(time.time())}.html")
-            with open(temp_html_file, "w", encoding="utf-8") as f:
-                f.write(html_content)
-            actual_file_path = temp_html_file
-        elif input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
-            try:
-                input_file = download_url_to_tempfile(input_file, ".html")
-                temp_files.append(input_file)
-                logger.info(f"已下载HTML到临时文件: {input_file}, 大小: {os.path.getsize(input_file) if os.path.exists(input_file) else '不存在'} 字节")
-            except Exception as e:
-                logger.error(f"下载HTML失败: {str(e)}")
-                shutil.rmtree(temp_dir)
-                return {"success": False, "error": f"Error downloading html from URL: {str(e)}"}
-            actual_file_path = input_file
+            HTML(string=html_content).write_pdf(output_file)
         elif input_file:
-            actual_file_path = input_file
+            if input_file.startswith("http://") or input_file.startswith("https://"):
+                HTML(url=input_file).write_pdf(output_file)
+            else:
+                HTML(filename=input_file).write_pdf(output_file)
         else:
             shutil.rmtree(temp_dir)
             return {"success": False, "error": "You must provide either input_file or html_content"}
-        output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
-        # 支持 Markdown 文件路径
-        if actual_file_path.lower().endswith((".md", ".markdown")):
-            import markdown
-            with open(actual_file_path, 'r', encoding='utf-8') as md_file:
-                md_content = md_file.read()
-            html_content_md = markdown.markdown(md_content)
-            html_temp = os.path.splitext(actual_file_path)[0] + '.temp.html'
-            with open(html_temp, 'w', encoding='utf-8') as f:
-                f.write(f"""
-                <html><head><meta charset='utf-8'></head><body>{html_content_md}</body></html>
-                """)
-            actual_file_path = html_temp
-        pdfkit.from_file(actual_file_path, output_file)
-        if actual_file_path.endswith('.temp.html'):
-            try: os.remove(actual_file_path)
-            except: pass
-        if temp_html_file and os.path.exists(temp_html_file):
-            os.remove(temp_html_file)
         shutil.rmtree(temp_dir)
-        for f in temp_files:
-            os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
-        logger.error(f"下载HTML失败: {str(e)}")
-        return {"success": False, "error": f"Error converting HTML/Markdown to PDF: {str(e)}"}
+        return {"success": False, "error": f"Error converting HTML to PDF: {str(e)}"}
 
 # HTML to DOCX conversion tool (基于 Pandoc)
 @mcp.tool("html2docx")
