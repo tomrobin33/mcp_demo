@@ -335,21 +335,24 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
             from docx2pdf import convert
             convert(actual_file_path, temp_output_file)
         except Exception as e:
-                import shutil
-                shutil.rmtree(temp_dir)
+            import shutil
+            shutil.rmtree(temp_dir)
             if is_temp_url:
-                try: os.remove(actual_file_path)
-                except: pass
+                try:
+                    os.remove(actual_file_path)
+                except:
+                    pass
             return {"success": False, "error": f"Error converting DOCX to PDF: {str(e)}"}
-                import shutil
+        import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
         shutil.move(temp_output_file, output_file)
-                shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir)
         if is_temp_url:
-            try: os.remove(actual_file_path)
-            except: pass
+            try:
+                os.remove(actual_file_path)
+            except:
+                pass
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
-    
     except Exception as e:
         logger.error(f"Unexpected error in convert_docx_to_pdf: {str(e)}")
         return debug_json_response(format_error_response(f"Error converting DOCX to PDF: {str(e)}"))
@@ -377,8 +380,8 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
                     f.write(file_content)
                 actual_file_path = temp_input_file
             except Exception as e:
-                    import shutil
-                    shutil.rmtree(temp_dir)
+                import shutil
+                shutil.rmtree(temp_dir)
                 return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
             try:
@@ -396,22 +399,24 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             cv.convert(temp_output_file, start=0, end=-1)
             cv.close()
         except Exception as e:
-                import shutil
-                shutil.rmtree(temp_dir)
+            import shutil
+            shutil.rmtree(temp_dir)
             if is_temp_url:
-                try: os.remove(actual_file_path)
-                except: pass
+                try:
+                    os.remove(actual_file_path)
+                except:
+                    pass
             return {"success": False, "error": f"Error converting PDF to DOCX: {str(e)}"}
-        # 移动输出文件到当前目录
-                import shutil
+        import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.docx"
         shutil.move(temp_output_file, output_file)
-                shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir)
         if is_temp_url:
-            try: os.remove(actual_file_path)
-            except: pass
+            try:
+                os.remove(actual_file_path)
+            except:
+                pass
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
-    
     except Exception as e:
         logger.error(f"Unexpected error in convert_pdf_to_docx: {str(e)}")
         return debug_json_response(format_error_response(f"Error converting PDF to DOCX: {str(e)}"))
@@ -429,8 +434,8 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
         is_temp_url = False
         if file_content_base64:
             if not input_format:
-                    import shutil
-                    shutil.rmtree(temp_dir)
+                import shutil
+                shutil.rmtree(temp_dir)
                 return {"success": False, "error": "input_format is required when using file_content_base64"}
             temp_input_file = os.path.join(temp_dir, f"input_{int(time.time())}.{input_format.lower()}")
             temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.{output_format.lower()}")
@@ -440,8 +445,8 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
                     f.write(file_content)
                 actual_file_path = temp_input_file
             except Exception as e:
-                    import shutil
-                    shutil.rmtree(temp_dir)
+                import shutil
+                shutil.rmtree(temp_dir)
                 return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
             try:
@@ -464,21 +469,24 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
                     img = background
             img.save(temp_output_file)
         except Exception as e:
-                import shutil
-                shutil.rmtree(temp_dir)
+            import shutil
+            shutil.rmtree(temp_dir)
             if is_temp_url:
-                try: os.remove(actual_file_path)
-                except: pass
+                try:
+                    os.remove(actual_file_path)
+                except:
+                    pass
             return {"success": False, "error": f"Error during image conversion: {str(e)}"}
-                import shutil
+        import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.{output_format.lower()}"
         shutil.move(temp_output_file, output_file)
-                shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir)
         if is_temp_url:
-            try: os.remove(actual_file_path)
-            except: pass
+            try:
+                os.remove(actual_file_path)
+            except:
+                pass
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
-    
     except Exception as e:
         logger.error(f"Unexpected error in convert_image: {str(e)}")
         return debug_json_response(format_error_response(f"Error converting image: {str(e)}"))
@@ -513,9 +521,9 @@ def convert_html_to_pdf(input_file: str) -> dict:
                     md_content = md_file.read()
                 html_content = markdown.markdown(md_content)
                 html_temp = os.path.splitext(actual_file_path)[0] + '.temp.html'
-            with open(html_temp, 'w', encoding='utf-8') as f:
-                f.write(f"""
-                <html><head><meta charset='utf-8'></head><body>{html_content}</body></html>
+                with open(html_temp, 'w', encoding='utf-8') as f:
+                    f.write(f"""
+                        <html><head><meta charset='utf-8'></head><body>{html_content}</body></html>
                     """)
                 actual_file_path = html_temp
         import pdfkit
