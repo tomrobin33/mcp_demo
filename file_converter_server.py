@@ -923,7 +923,7 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
     result = convert_file(file_content_base64=file_content_base64, input_format="md", output_format="pdf")
     return debug_json_response(result)
 
-打完# Markdown to PDF
+# Markdown to PDF
 @mcp.tool("markdown2pdf")
 def markdown2pdf(markdown_text: str) -> dict:
     import tempfile, os, time, shutil
