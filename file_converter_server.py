@@ -361,10 +361,19 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
 @mcp.tool("pdf2docx")
 def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None) -> dict:
     """
-    Convert a PDF file to DOCX format. Supports both file path and direct file content input.
+    Convert a PDF file to DOCX format. Supports both file path, URL, and direct file content input.
     """
     try:
         logger.info(f"Starting PDF to DOCX conversion")
+        # 新增：如果input_file是URL，自动下载并转base64
+        if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+            try:
+                response = requests.get(input_file)
+                response.raise_for_status()
+                file_content_base64 = base64.b64encode(response.content).decode('utf-8')
+                input_file = None  # 只走base64分支
+            except Exception as e:
+                return {"success": False, "error": f"Error downloading file from URL: {str(e)}"}
         if input_file is None and file_content_base64 is None:
             logger.error("No input provided: both input_file and file_content_base64 are None")
             return {"success": False, "error": "You must provide either input_file or file_content_base64"}
@@ -625,16 +634,20 @@ def convert_docx_to_pdf_content(file_content_base64: str) -> dict:
 
 # Direct PDF to DOCX conversion with content
 @mcp.tool("pdf2docx_content")
-def convert_pdf_to_docx_content(file_content_base64: str) -> dict:
+def convert_pdf_to_docx_content(file_content_base64: str = None, input_file: str = None) -> dict:
     """
-    Convert a PDF file directly from its base64 content to DOCX format.
-    
-    Args:
-        file_content_base64: Base64 encoded content of the PDF file
-        
-    Returns:
-        Dictionary containing success status and either base64 encoded DOCX or error message.
+    Convert a PDF file directly from its base64 content or URL to DOCX format.
     """
+    # 新增：如果input_file是URL，自动下载并转base64
+    if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+        try:
+            response = requests.get(input_file)
+            response.raise_for_status()
+            file_content_base64 = base64.b64encode(response.content).decode('utf-8')
+        except Exception as e:
+            return debug_json_response({"success": False, "error": f"Error downloading file from URL: {str(e)}"})
+    if not file_content_base64:
+        return debug_json_response({"success": False, "error": "No base64 content provided."})
     result = convert_pdf_to_docx(file_content_base64=file_content_base64)
     return debug_json_response(result)
 
