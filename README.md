@@ -61,6 +61,7 @@ This MCP server provides multiple file conversion tools for converting various d
    ```
 
    Note: Some conversion libraries may have additional system dependencies. Please check their documentation for details.
+   - **The HTML to DOCX feature requires Pandoc to be installed on your system** for the html2docx tool to work.
 
 ## Usage
 

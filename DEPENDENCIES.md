@@ -11,6 +11,7 @@ This project uses the following main dependencies:
 - `pandas` - Data processing library
 - `pdfkit` - HTML to PDF conversion
 - `markdown` - Markdown processing
+- `pandoc` (系统依赖) - HTML to DOCX conversion（html2docx功能需要）
 
 ## Package Managers
 
@@ -73,6 +74,21 @@ python test_dependencies.py
   - `.github/workflows/python-test.yml` - Using uv
   - `.github/workflows/python-test-pip.yml` - Using pip
 - Ensure all dependencies are correctly declared in `pyproject.toml`
+
+## System-level Dependencies
+
+### Pandoc
+The HTML to DOCX feature requires Pandoc to be installed on your server. Install with:
+
+Ubuntu/Debian:
+```bash
+sudo apt-get update && sudo apt-get install -y pandoc
+```
+CentOS/RHEL:
+```bash
+sudo yum install -y pandoc
+```
+See: https://pandoc.org/installing.html
 
 ### 3. System-level Dependencies
 
