@@ -920,5 +920,109 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
     result = convert_file(file_content_base64=file_content_base64, input_format="md", output_format="pdf")
     return debug_json_response(result)
 
+# Markdown to PDF
+@mcp.tool("markdown2pdf")
+def markdown2pdf(markdown_text: str) -> dict:
+    import tempfile, os, time, shutil
+    try:
+        logger.info("Starting Markdown to PDF conversion")
+        temp_dir = tempfile.mkdtemp()
+        temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
+        temp_pdf_file = os.path.join(temp_dir, f"output_{int(time.time())}.pdf")
+        # 写入markdown内容
+        with open(temp_md_file, "w", encoding="utf-8") as f:
+            f.write(markdown_text)
+        # 用html2pdf工具链（已支持md转pdf）
+        try:
+            result = convert_html_to_pdf(temp_md_file)
+            if not result.get("success"):
+                logger.error(f"Markdown转PDF失败: {result.get('error')}")
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": result.get("error")}
+            output_file = result.get("output_file")
+            download_url = result.get("download_url")
+            logger.info(f"Markdown转PDF成功: {output_file}")
+        except Exception as e:
+            logger.error(f"Markdown转PDF异常: {str(e)}")
+            shutil.rmtree(temp_dir)
+            return {"success": False, "error": f"Error converting Markdown to PDF: {str(e)}"}
+        shutil.rmtree(temp_dir)
+        return {"success": True, "output_file": output_file, "download_url": download_url}
+    except Exception as e:
+        logger.error(f"Unexpected error in markdown2pdf: {str(e)}")
+        return {"success": False, "error": f"Error converting Markdown to PDF: {str(e)}"}
+
+# Markdown to DOCX
+@mcp.tool("markdown2docx")
+def markdown2docx(markdown_text: str) -> dict:
+    import tempfile, os, time, shutil, subprocess
+    try:
+        logger.info("Starting Markdown to DOCX conversion")
+        temp_dir = tempfile.mkdtemp()
+        temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
+        temp_docx_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
+        # 写入markdown内容
+        with open(temp_md_file, "w", encoding="utf-8") as f:
+            f.write(markdown_text)
+        # 用pandoc生成docx
+        try:
+            subprocess.run(["pandoc", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception as e:
+            logger.error(f"Pandoc 未安装或不可用: {str(e)}")
+            shutil.rmtree(temp_dir)
+            return {"success": False, "error": "Pandoc 未安装或不可用，请先在服务器安装 pandoc。"}
+        try:
+            result = subprocess.run([
+                "pandoc", temp_md_file, "-o", temp_docx_file
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                logger.error(f"Pandoc 转换失败: {result.stderr.decode('utf-8')}")
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"Pandoc 转换失败: {result.stderr.decode('utf-8')}"}
+            logger.info(f"Pandoc 转换完成，检查临时输出文件是否存在: {temp_docx_file}, 存在: {os.path.exists(temp_docx_file)}")
+            if not os.path.exists(temp_docx_file):
+                logger.error(f"转换失败，未生成临时输出文件: {temp_docx_file}")
+                shutil.rmtree(temp_dir)
+                return {"success": False, "error": f"Markdown转换未生成输出文件，可能源文件损坏或格式不支持。"}
+        except Exception as e:
+            logger.error(f"Markdown转换异常: {str(e)}")
+            shutil.rmtree(temp_dir)
+            return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
+        output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.docx"
+        logger.info(f"准备保存输出文件到: {output_file}")
+        output_dir = os.path.dirname(output_file)
+        os.makedirs(output_dir, exist_ok=True)
+        if not os.path.exists(temp_docx_file):
+            logger.error(f"临时输出文件未生成: {temp_docx_file}")
+            shutil.rmtree(temp_dir)
+            return {"success": False, "error": f"临时输出文件未生成: {temp_docx_file}"}
+        try:
+            shutil.move(temp_docx_file, output_file)
+            logger.info(f"已成功保存输出文件到: {output_file}")
+            # 自动上传到静态服务器
+            try:
+                from upload_to_server import upload_to_static_server
+                remote_file = f"/root/files/{os.path.basename(output_file)}"
+                hostname = "8.156.74.79"
+                username = "root"
+                password = "zfsZBC123."
+                upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
+                if not upload_success:
+                    logger.error(f"自动上传到静态服务器失败: {remote_file}")
+                    return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
+                logger.info(f"自动上传到静态服务器成功: {remote_file}")
+            except Exception as e:
+                logger.error(f"自动上传到静态服务器异常: {str(e)}")
+                return {"success": False, "error": f"自动上传到静态服务器异常: {str(e)}"}
+        except Exception as e:
+            logger.error(f"移动输出文件失败: {str(e)}")
+            shutil.rmtree(temp_dir)
+            return {"success": False, "error": f"Error moving output file: {str(e)}"}
+        shutil.rmtree(temp_dir)
+        return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
+    except Exception as e:
+        logger.error(f"Unexpected error in markdown2docx: {str(e)}")
+        return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
+
 if __name__ == "__main__":
     mcp.run() 
