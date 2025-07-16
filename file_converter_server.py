@@ -303,7 +303,10 @@ def download_url_to_tempfile(url, suffix):
         tmp_file.write(response.content)
         return tmp_file.name
 
+# 在OUTPUT_DIR定义后自动创建目录
 OUTPUT_DIR = "/root/files"
+import os
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def get_download_url(filename):
     host = "8.156.74.79"
@@ -359,6 +362,7 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
             return {"success": False, "error": f"Error converting DOCX to PDF: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
+        logger.info(f"准备保存输出文件到: {output_file}")
         shutil.move(temp_output_file, output_file)
         shutil.rmtree(temp_dir)
         for f in temp_files:
@@ -431,6 +435,7 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             return {"success": False, "error": f"Error converting PDF to DOCX: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.docx"
+        logger.info(f"准备保存输出文件到: {output_file}")
         shutil.move(temp_output_file, output_file)
         shutil.rmtree(temp_dir)
         for f in temp_files:
@@ -505,6 +510,7 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
             return {"success": False, "error": f"Error during image conversion: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.{output_format.lower()}"
+        logger.info(f"准备保存输出文件到: {output_file}")
         shutil.move(temp_output_file, output_file)
         shutil.rmtree(temp_dir)
         for f in temp_files:
