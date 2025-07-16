@@ -295,6 +295,14 @@ def handle_input_file_with_url(input_file, expected_extension: str = None):
     else:
         return None, False
 
+def download_url_to_tempfile(url, suffix):
+    """下载URL内容到临时文件，返回临时文件路径"""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        response = requests.get(url)
+        response.raise_for_status()
+        tmp_file.write(response.content)
+        return tmp_file.name
+
 OUTPUT_DIR = "/root/files"
 
 def get_download_url(filename):
@@ -306,12 +314,21 @@ def get_download_url(filename):
 @mcp.tool("docx2pdf")
 def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None) -> dict:
     try:
+        logger.info(f"Starting DOCX to PDF conversion")
+        temp_files = []
+        # 如果input_file是URL，自动下载到临时文件
+        if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+            try:
+                input_file = download_url_to_tempfile(input_file, ".docx")
+                temp_files.append(input_file)
+            except Exception as e:
+                return {"success": False, "error": f"Error downloading file from URL: {str(e)}"}
         if input_file is None and file_content_base64 is None:
             return {"success": False, "error": "You must provide either input_file or file_content_base64"}
         temp_dir = tempfile.mkdtemp()
         temp_input_file = os.path.join(temp_dir, f"input_{int(time.time())}.docx")
         temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.pdf")
-        is_temp_url = False
+        # Handle direct content mode
         if file_content_base64:
             try:
                 file_content = base64.b64decode(file_content_base64)
@@ -324,12 +341,12 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
                 return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
             try:
-                actual_file_path, is_temp_url = handle_input_file_with_url(input_file, ".docx")
-                if not actual_file_path:
-                    raise ValueError("File path could not be resolved from input_file")
+                actual_file_path = input_file
             except Exception as e:
                 import shutil
                 shutil.rmtree(temp_dir)
+                for f in temp_files:
+                    os.remove(f)
                 return {"success": False, "error": f"Error finding DOCX file: {str(e)}"}
         try:
             from docx2pdf import convert
@@ -337,21 +354,15 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
         except Exception as e:
             import shutil
             shutil.rmtree(temp_dir)
-            if is_temp_url:
-                try:
-                    os.remove(actual_file_path)
-                except:
-                    pass
+            for f in temp_files:
+                os.remove(f)
             return {"success": False, "error": f"Error converting DOCX to PDF: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
         shutil.move(temp_output_file, output_file)
         shutil.rmtree(temp_dir)
-        if is_temp_url:
-            try:
-                os.remove(actual_file_path)
-            except:
-                pass
+        for f in temp_files:
+            os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
         logger.error(f"Unexpected error in convert_docx_to_pdf: {str(e)}")
@@ -365,13 +376,12 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
     """
     try:
         logger.info(f"Starting PDF to DOCX conversion")
-        # 新增：如果input_file是URL，自动下载并转base64
+        temp_files = []
+        # 如果input_file是URL，自动下载到临时文件
         if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
             try:
-                response = requests.get(input_file)
-                response.raise_for_status()
-                file_content_base64 = base64.b64encode(response.content).decode('utf-8')
-                input_file = None  # 只走base64分支
+                input_file = download_url_to_tempfile(input_file, ".pdf")
+                temp_files.append(input_file)
             except Exception as e:
                 return {"success": False, "error": f"Error downloading file from URL: {str(e)}"}
         if input_file is None and file_content_base64 is None:
@@ -394,9 +404,7 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
                 return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
             try:
-                actual_file_path, is_temp_url = handle_input_file_with_url(input_file, ".pdf")
-                if not actual_file_path:
-                    raise ValueError("File path could not be resolved from input_file")
+                actual_file_path = input_file
             except Exception as e:
                 import shutil
                 shutil.rmtree(temp_dir)
@@ -412,25 +420,21 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
                 logger.error(f"转换失败，未生成临时输出文件: {temp_output_file}")
                 import shutil
                 shutil.rmtree(temp_dir)
+                for f in temp_files:
+                    os.remove(f)
                 return {"success": False, "error": f"PDF转换未生成输出文件，可能源文件损坏或格式不支持。"}
         except Exception as e:
             import shutil
             shutil.rmtree(temp_dir)
-            if is_temp_url:
-                try:
-                    os.remove(actual_file_path)
-                except:
-                    pass
+            for f in temp_files:
+                os.remove(f)
             return {"success": False, "error": f"Error converting PDF to DOCX: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.docx"
         shutil.move(temp_output_file, output_file)
         shutil.rmtree(temp_dir)
-        if is_temp_url:
-            try:
-                os.remove(actual_file_path)
-            except:
-                pass
+        for f in temp_files:
+            os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
         logger.error(f"Unexpected error in convert_pdf_to_docx: {str(e)}")
@@ -440,13 +444,21 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
 @mcp.tool("convert_image")
 def convert_image(input_file: str = None, file_content_base64: str = None, output_format: str = None, input_format: str = None) -> dict:
     try:
+        temp_files = []
+        if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+            try:
+                # 自动识别后缀
+                suffix = f".{input_format.lower()}" if input_format else ".img"
+                input_file = download_url_to_tempfile(input_file, suffix)
+                temp_files.append(input_file)
+            except Exception as e:
+                return {"success": False, "error": f"Error downloading image from URL: {str(e)}"}
         if input_file is None and file_content_base64 is None:
             return {"success": False, "error": "You must provide either input_file or file_content_base64"}
         valid_formats = ["jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff"]
         if not output_format or output_format.lower() not in valid_formats:
             return {"success": False, "error": f"Unsupported output format: {output_format}. Supported formats: {', '.join(valid_formats)}"}
         temp_dir = tempfile.mkdtemp()
-        is_temp_url = False
         if file_content_base64:
             if not input_format:
                 import shutil
@@ -462,17 +474,19 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
             except Exception as e:
                 import shutil
                 shutil.rmtree(temp_dir)
+                for f in temp_files:
+                    os.remove(f)
                 return {"success": False, "error": f"Error processing input file content: {str(e)}"}
         else:
             try:
-                actual_file_path, is_temp_url = handle_input_file_with_url(input_file)
-                if not actual_file_path:
-                    raise ValueError("File path could not be resolved from input_file")
+                actual_file_path = input_file
                 input_format = os.path.splitext(actual_file_path)[1].lstrip('.') if not input_format else input_format
                 temp_output_file = os.path.join(temp_dir, f"output_{int(time.time())}.{output_format.lower()}")
             except Exception as e:
                 import shutil
                 shutil.rmtree(temp_dir)
+                for f in temp_files:
+                    os.remove(f)
                 return {"success": False, "error": f"Error finding input image file: {str(e)}"}
         try:
             from PIL import Image
@@ -486,21 +500,15 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
         except Exception as e:
             import shutil
             shutil.rmtree(temp_dir)
-            if is_temp_url:
-                try:
-                    os.remove(actual_file_path)
-                except:
-                    pass
+            for f in temp_files:
+                os.remove(f)
             return {"success": False, "error": f"Error during image conversion: {str(e)}"}
         import shutil
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.{output_format.lower()}"
         shutil.move(temp_output_file, output_file)
         shutil.rmtree(temp_dir)
-        if is_temp_url:
-            try:
-                os.remove(actual_file_path)
-            except:
-                pass
+        for f in temp_files:
+            os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
         logger.error(f"Unexpected error in convert_image: {str(e)}")
@@ -510,16 +518,22 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
 @mcp.tool("excel2csv")
 def convert_excel_to_csv(input_file: str) -> dict:
     try:
+        temp_files = []
+        if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+            try:
+                input_file = download_url_to_tempfile(input_file, ".xlsx")
+                temp_files.append(input_file)
+            except Exception as e:
+                return {"success": False, "error": f"Error downloading excel from URL: {str(e)}"}
         if not input_file.lower().endswith((".xls", ".xlsx")):
             return {"success": False, "error": f"File must be an Excel file (.xls or .xlsx), got: {input_file}"}
-        actual_file_path, is_temp_url = handle_input_file_with_url(input_file)
+        actual_file_path = input_file
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.csv"
         import pandas as pd
         df = pd.read_excel(actual_file_path)
         df.to_csv(output_file, index=False)
-        if is_temp_url:
-            try: os.remove(actual_file_path)
-            except: pass
+        for f in temp_files:
+            os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
         return {"success": False, "error": f"Error converting Excel to CSV: {str(e)}"}
@@ -528,27 +542,34 @@ def convert_excel_to_csv(input_file: str) -> dict:
 @mcp.tool("html2pdf")
 def convert_html_to_pdf(input_file: str) -> dict:
     try:
-        actual_file_path, is_temp_url = handle_input_file_with_url(input_file)
+        temp_files = []
+        if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
+            try:
+                # 默认按.html后缀下载
+                input_file = download_url_to_tempfile(input_file, ".html")
+                temp_files.append(input_file)
+            except Exception as e:
+                return {"success": False, "error": f"Error downloading html from URL: {str(e)}"}
+        actual_file_path = input_file
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
         if actual_file_path.lower().endswith((".md", ".markdown")):
-                import markdown
-                with open(actual_file_path, 'r', encoding='utf-8') as md_file:
-                    md_content = md_file.read()
-                html_content = markdown.markdown(md_content)
-                html_temp = os.path.splitext(actual_file_path)[0] + '.temp.html'
-                with open(html_temp, 'w', encoding='utf-8') as f:
-                    f.write(f"""
-                        <html><head><meta charset='utf-8'></head><body>{html_content}</body></html>
-                    """)
-                actual_file_path = html_temp
+            import markdown
+            with open(actual_file_path, 'r', encoding='utf-8') as md_file:
+                md_content = md_file.read()
+            html_content = markdown.markdown(md_content)
+            html_temp = os.path.splitext(actual_file_path)[0] + '.temp.html'
+            with open(html_temp, 'w', encoding='utf-8') as f:
+                f.write(f"""
+                <html><head><meta charset='utf-8'></head><body>{html_content}</body></html>
+                """)
+            actual_file_path = html_temp
         import pdfkit
         pdfkit.from_file(actual_file_path, output_file)
         if actual_file_path.endswith('.temp.html'):
             try: os.remove(actual_file_path)
             except: pass
-        if is_temp_url:
-            try: os.remove(actual_file_path)
-            except: pass
+        for f in temp_files:
+            os.remove(f)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
         return {"success": False, "error": f"Error converting HTML/Markdown to PDF: {str(e)}"}
