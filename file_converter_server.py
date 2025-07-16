@@ -481,6 +481,22 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
         try:
             shutil.move(temp_output_file, output_file)
             logger.info(f"已成功保存输出文件到: {output_file}")
+            # === 集成自动上传到静态服务器 ===
+            try:
+                from upload_to_server import upload_to_static_server
+                remote_file = f"/root/files/{os.path.basename(output_file)}"
+                hostname = "8.156.74.79"
+                username = "root"
+                password = "zfsZBC123."
+                upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
+                if not upload_success:
+                    logger.error(f"自动上传到静态服务器失败: {remote_file}")
+                    return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
+                logger.info(f"自动上传到静态服务器成功: {remote_file}")
+            except Exception as e:
+                logger.error(f"自动上传到静态服务器异常: {str(e)}")
+                return {"success": False, "error": f"自动上传到静态服务器异常: {str(e)}"}
+            # === END ===
         except Exception as e:
             logger.error(f"移动输出文件失败: {str(e)}")
             shutil.rmtree(temp_dir)
