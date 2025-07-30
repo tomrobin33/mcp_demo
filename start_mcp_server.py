@@ -71,6 +71,7 @@ def main():
         print("  - html2pdf: Convert HTML/Markdown to PDF")
         print("  - convert_file: Generic file conversion")
         print("  - convert_content: Convert from base64 content")
+        print("  - upload_pdf_to_server: Upload PDF files to server")
         print("\nStarting server...")
         
         # Run the MCP server

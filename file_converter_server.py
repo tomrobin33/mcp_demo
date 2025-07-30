@@ -994,5 +994,120 @@ def markdown2docx(markdown_text: str) -> dict:
         logger.error(f"Unexpected error in markdown2docx: {str(e)}")
         return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
 
+# Upload PDF to server tool
+@mcp.tool("upload_pdf_to_server")
+def upload_pdf_to_server(input_file: str = None, file_content_base64: str = None) -> dict:
+    """
+    上传PDF文件到服务器并返回公网下载链接
+    
+    Args:
+        input_file: PDF文件路径（支持本地文件路径或URL）
+        file_content_base64: PDF文件的Base64编码内容
+    
+    Returns:
+        dict: 包含上传结果和下载链接的字典
+    """
+    try:
+        logger.info("Starting PDF upload to server")
+        temp_files = []
+        
+        # 处理输入文件
+        if input_file:
+            if input_file.startswith("http://") or input_file.startswith("https://"):
+                try:
+                    input_file = download_url_to_tempfile(input_file, ".pdf")
+                    temp_files.append(input_file)
+                    logger.info(f"已下载PDF到临时文件: {input_file}")
+                except Exception as e:
+                    logger.error(f"下载PDF失败: {str(e)}")
+                    return {"success": False, "error": f"Error downloading PDF from URL: {str(e)}"}
+            
+            # 验证文件存在且是PDF
+            try:
+                actual_file_path = validate_file_exists(input_file, ".pdf")
+                logger.info(f"找到PDF文件: {actual_file_path}")
+            except Exception as e:
+                logger.error(f"PDF文件验证失败: {str(e)}")
+                return {"success": False, "error": f"PDF file validation failed: {str(e)}"}
+        
+        elif file_content_base64:
+            # 从Base64内容创建临时文件
+            temp_dir = tempfile.mkdtemp()
+            temp_pdf_file = os.path.join(temp_dir, f"pdf_{int(time.time())}.pdf")
+            try:
+                file_content = base64.b64decode(file_content_base64)
+                with open(temp_pdf_file, "wb") as f:
+                    f.write(file_content)
+                actual_file_path = temp_pdf_file
+                temp_files.append(temp_pdf_file)
+                logger.info(f"已从Base64创建PDF临时文件: {temp_pdf_file}")
+            except Exception as e:
+                logger.error(f"Base64解码失败: {str(e)}")
+                return {"success": False, "error": f"Error decoding Base64 content: {str(e)}"}
+        else:
+            return {"success": False, "error": "You must provide either input_file or file_content_base64"}
+        
+        # 验证PDF文件
+        if not os.path.exists(actual_file_path):
+            return {"success": False, "error": f"PDF file not found: {actual_file_path}"}
+        
+        file_size = os.path.getsize(actual_file_path)
+        if file_size == 0:
+            return {"success": False, "error": "PDF file is empty"}
+        
+        logger.info(f"PDF文件大小: {file_size} 字节")
+        
+        # 上传到服务器
+        try:
+            from upload_to_server import upload_to_static_server
+            
+            # 生成远程文件名
+            filename = os.path.basename(actual_file_path)
+            if not filename.lower().endswith('.pdf'):
+                filename = f"{filename}.pdf"
+            
+            remote_file = f"/root/files/{filename}"
+            hostname = "8.156.74.79"
+            username = "root"
+            password = "zfsZBC123."
+            
+            logger.info(f"开始上传PDF到服务器: {remote_file}")
+            upload_success = upload_to_static_server(actual_file_path, remote_file, hostname, username, password)
+            
+            if not upload_success:
+                logger.error(f"PDF上传到服务器失败: {remote_file}")
+                return {"success": False, "error": f"Failed to upload PDF to server: {remote_file}"}
+            
+            # 生成下载链接
+            download_url = get_download_url(filename)
+            logger.info(f"PDF上传成功，下载链接: {download_url}")
+            
+            return {
+                "success": True,
+                "message": "PDF uploaded successfully",
+                "filename": filename,
+                "file_size": file_size,
+                "download_url": download_url,
+                "upload_result": "success"
+            }
+            
+        except Exception as e:
+            logger.error(f"PDF上传异常: {str(e)}")
+            return {"success": False, "error": f"Error uploading PDF: {str(e)}"}
+        
+        finally:
+            # 清理临时文件
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                        logger.info(f"已清理临时文件: {temp_file}")
+                except Exception as e:
+                    logger.warning(f"清理临时文件失败: {temp_file}, 错误: {str(e)}")
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in upload_pdf_to_server: {str(e)}")
+        return {"success": False, "error": f"Unexpected error: {str(e)}"}
+
 if __name__ == "__main__":
     mcp.run() 
