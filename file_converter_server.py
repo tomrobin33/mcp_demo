@@ -32,7 +32,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler(sys.stderr)  # 将日志输出到stderr而不是stdout
     ]
 )
 logger = logging.getLogger("file_converter_mcp")
@@ -334,6 +334,49 @@ def enhanced_parse_json(text):
             logger.error(f"Position {e.pos}: {text[max(0, e.pos-10):e.pos]}[HERE>{text[e.pos:e.pos+1]}<HERE]{text[e.pos+1:min(len(text), e.pos+10)]}")
             logger.error(f"Full error: {traceback.format_exc()}")
             raise
+
+def fix_reasoning_format(text):
+    """修复推理格式问题，添加必要的标识字段"""
+    try:
+        logger.info("Attempting to fix reasoning format...")
+        
+        # 检查是否包含推理格式错误信息
+        if "Agent节点执行失败" in text or "无效的推理格式" in text or "缺少必要的标识字段" in text:
+            logger.info("Detected reasoning format error, attempting to extract content")
+            
+            # 尝试提取实际内容
+            # 1. 查找可能的JSON内容
+            json_start = text.find('{')
+            if json_start != -1:
+                json_end = text.rfind('}')
+                if json_end > json_start:
+                    json_content = text[json_start:json_end+1]
+                    try:
+                        parsed = json.loads(json_content)
+                        logger.info("Successfully extracted JSON content from reasoning error")
+                        return parsed
+                    except:
+                        pass
+            
+            # 2. 查找可能的markdown内容
+            if '#' in text:
+                # 找到第一个#的位置
+                md_start = text.find('#')
+                if md_start != -1:
+                    markdown_content = text[md_start:].strip()
+                    logger.info("Extracted markdown content from reasoning error")
+                    return {"markdown_text": markdown_content}
+            
+            # 3. 如果都没有找到，尝试包装整个内容
+            logger.info("No specific content found, wrapping entire text")
+            return {"markdown_text": text.strip()}
+        
+        # 如果不是推理格式错误，直接返回原内容
+        return text
+        
+    except Exception as e:
+        logger.error(f"Error fixing reasoning format: {str(e)}")
+        return text
 
 # If mcp has parse_json attribute, replace it
 if hasattr(mcp, 'parse_json'):
@@ -1070,6 +1113,17 @@ def markdown2docx(markdown_text: str) -> dict:
         
         # 验证和修复参数
         try:
+            # 首先检查是否是推理格式错误
+            if isinstance(markdown_text, str) and ("Agent节点执行失败" in markdown_text or "无效的推理格式" in markdown_text):
+                logger.info("Detected reasoning format error, attempting to fix")
+                fixed_result = fix_reasoning_format(markdown_text)
+                if isinstance(fixed_result, dict) and 'markdown_text' in fixed_result:
+                    markdown_text = fixed_result['markdown_text']
+                    logger.info("Successfully fixed reasoning format")
+                elif isinstance(fixed_result, str):
+                    markdown_text = fixed_result
+                    logger.info("Fixed reasoning format, extracted string content")
+            
             # 如果markdown_text是字典或JSON字符串，尝试提取实际内容
             if isinstance(markdown_text, dict):
                 if 'markdown_text' in markdown_text:
