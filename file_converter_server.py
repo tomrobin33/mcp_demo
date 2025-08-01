@@ -238,33 +238,172 @@ def debug_json_response(response):
 original_parse_json = mcp.parse_json if hasattr(mcp, 'parse_json') else None
 
 def enhanced_parse_json(text):
-    """Enhanced JSON parsing with detailed error information"""
+    """Enhanced JSON parsing with detailed error information and format fixing"""
     try:
-        # Check if there's a non-JSON prefix
-        if text and not text.strip().startswith('{') and not text.strip().startswith('['):
-            # Try to find the start of JSON
-            json_start = text.find('{')
-            if json_start == -1:
-                json_start = text.find('[')
-            
-            if json_start > 0:
-                logger.warning(f"Found non-JSON prefix: '{text[:json_start]}'")
-                text = text[json_start:]
-                logger.info(f"Stripped prefix, new text: '{text[:100]}...'")
-        
+        # 首先尝试直接解析
         return json.loads(text)
     except json.JSONDecodeError as e:
-        logger.error(f"JSON parsing error: {str(e)}")
-        logger.error(f"Problematic string: '{text}'")
-        logger.error(f"Position {e.pos}: {text[max(0, e.pos-10):e.pos]}[HERE>{text[e.pos:e.pos+1]}<HERE]{text[e.pos+1:min(len(text), e.pos+10)]}")
-        logger.error(f"Full error: {traceback.format_exc()}")
-        raise
+        logger.warning(f"Initial JSON parsing failed: {str(e)}")
+        logger.info(f"Attempting to fix JSON format...")
+        
+        # 尝试修复常见的JSON格式问题
+        fixed_text = text
+        
+        # 1. 移除可能的非JSON前缀
+        if fixed_text and not fixed_text.strip().startswith('{') and not fixed_text.strip().startswith('['):
+            json_start = fixed_text.find('{')
+            if json_start == -1:
+                json_start = fixed_text.find('[')
+            
+            if json_start > 0:
+                logger.info(f"Removing non-JSON prefix: '{fixed_text[:json_start]}'")
+                fixed_text = fixed_text[json_start:]
+        
+        # 2. 处理可能的尾随字符
+        if fixed_text and not fixed_text.strip().endswith('}') and not fixed_text.strip().endswith(']'):
+            json_end = fixed_text.rfind('}')
+            if json_end == -1:
+                json_end = fixed_text.rfind(']')
+            
+            if json_end > 0:
+                logger.info(f"Removing trailing characters after JSON")
+                fixed_text = fixed_text[:json_end+1]
+        
+        # 3. 尝试修复常见的转义问题
+        try:
+            return json.loads(fixed_text)
+        except json.JSONDecodeError as e2:
+            logger.warning(f"Fixed JSON parsing also failed: {str(e2)}")
+            
+            # 4. 尝试更激进的修复 - 处理可能的markdown内容中的特殊字符
+            try:
+                # 如果看起来像是markdown内容，尝试包装成正确的JSON格式
+                if '"markdown_text"' in fixed_text or 'markdown_text' in fixed_text:
+                    # 提取markdown内容
+                    if '"markdown_text":' in fixed_text:
+                        # 找到markdown_text的值部分
+                        start_idx = fixed_text.find('"markdown_text":') + len('"markdown_text":')
+                        # 跳过空白字符
+                        while start_idx < len(fixed_text) and fixed_text[start_idx].isspace():
+                            start_idx += 1
+                        
+                        if start_idx < len(fixed_text):
+                            # 提取值部分
+                            if fixed_text[start_idx] == '"':
+                                # 处理字符串值
+                                start_idx += 1
+                                end_idx = start_idx
+                                while end_idx < len(fixed_text):
+                                    if fixed_text[end_idx] == '"' and fixed_text[end_idx-1] != '\\':
+                                        break
+                                    end_idx += 1
+                                markdown_content = fixed_text[start_idx:end_idx]
+                            else:
+                                # 处理非字符串值，尝试提取到下一个逗号或大括号
+                                end_idx = start_idx
+                                brace_count = 0
+                                while end_idx < len(fixed_text):
+                                    if fixed_text[end_idx] == '{':
+                                        brace_count += 1
+                                    elif fixed_text[end_idx] == '}':
+                                        brace_count -= 1
+                                        if brace_count < 0:
+                                            break
+                                    elif fixed_text[end_idx] == ',' and brace_count == 0:
+                                        break
+                                    end_idx += 1
+                                markdown_content = fixed_text[start_idx:end_idx]
+                            
+                            # 创建正确的JSON格式
+                            fixed_json = f'{{"markdown_text": {json.dumps(markdown_content)}}}'
+                            logger.info(f"Created fixed JSON: {fixed_json[:100]}...")
+                            return json.loads(fixed_json)
+                
+                # 5. 最后的尝试 - 如果内容看起来像markdown，直接包装
+                if fixed_text.strip().startswith('#') or '##' in fixed_text:
+                    logger.info("Content appears to be markdown, wrapping in JSON format")
+                    fixed_json = f'{{"markdown_text": {json.dumps(fixed_text.strip())}}}'
+                    return json.loads(fixed_json)
+                    
+            except Exception as e3:
+                logger.error(f"All JSON fixing attempts failed: {str(e3)}")
+            
+            # 如果所有修复都失败，记录详细信息并抛出原始错误
+            logger.error(f"JSON parsing error: {str(e)}")
+            logger.error(f"Problematic string: '{text}'")
+            logger.error(f"Position {e.pos}: {text[max(0, e.pos-10):e.pos]}[HERE>{text[e.pos:e.pos+1]}<HERE]{text[e.pos+1:min(len(text), e.pos+10)]}")
+            logger.error(f"Full error: {traceback.format_exc()}")
+            raise
 
 # If mcp has parse_json attribute, replace it
 if hasattr(mcp, 'parse_json'):
     mcp.parse_json = enhanced_parse_json
 else:
     logger.warning("Cannot enhance JSON parsing, mcp object doesn't have parse_json attribute")
+
+def validate_and_fix_mcp_parameters(params, expected_params):
+    """
+    验证和修复MCP工具参数
+    
+    Args:
+        params: 大模型返回的参数
+        expected_params: 期望的参数格式字典
+    
+    Returns:
+        修复后的参数字典
+    """
+    try:
+        # 如果params是字符串，尝试解析为JSON
+        if isinstance(params, str):
+            try:
+                params = enhanced_parse_json(params)
+            except:
+                # 如果解析失败，尝试包装成JSON
+                logger.warning("Failed to parse params as JSON, attempting to wrap")
+                params = {"markdown_text": params}
+        
+        # 验证必需参数
+        fixed_params = {}
+        for param_name, param_info in expected_params.items():
+            if param_name in params:
+                param_value = params[param_name]
+                expected_type = param_info.get('type', str)
+                
+                # 类型检查和转换
+                if expected_type == str and not isinstance(param_value, str):
+                    param_value = str(param_value)
+                elif expected_type == int and not isinstance(param_value, int):
+                    try:
+                        param_value = int(param_value)
+                    except:
+                        logger.warning(f"Could not convert {param_name} to int, using default")
+                        param_value = param_info.get('default', 0)
+                
+                fixed_params[param_name] = param_value
+            elif param_info.get('required', False):
+                # 必需参数缺失
+                default_value = param_info.get('default')
+                if default_value is not None:
+                    fixed_params[param_name] = default_value
+                    logger.warning(f"Missing required parameter {param_name}, using default: {default_value}")
+                else:
+                    raise ValueError(f"Missing required parameter: {param_name}")
+        
+        return fixed_params
+        
+    except Exception as e:
+        logger.error(f"Error validating MCP parameters: {str(e)}")
+        # 返回默认参数
+        return {name: info.get('default', '') for name, info in expected_params.items()}
+
+# 定义markdown2docx工具的期望参数格式
+MARKDOWN2DOCX_PARAMS = {
+    'markdown_text': {
+        'type': str,
+        'required': True,
+        'default': ''
+    }
+}
 
 # 辅助函数：判断input_file是否为URL并自动下载
 
@@ -928,6 +1067,29 @@ def markdown2docx(markdown_text: str) -> dict:
     import tempfile, os, time, shutil, subprocess
     try:
         logger.info("Starting Markdown to DOCX conversion")
+        
+        # 验证和修复参数
+        try:
+            # 如果markdown_text是字典或JSON字符串，尝试提取实际内容
+            if isinstance(markdown_text, dict):
+                if 'markdown_text' in markdown_text:
+                    markdown_text = markdown_text['markdown_text']
+                else:
+                    # 尝试找到包含markdown内容的键
+                    for key, value in markdown_text.items():
+                        if isinstance(value, str) and ('#' in value or 'markdown' in key.lower()):
+                            markdown_text = value
+                            break
+            
+            # 确保markdown_text是字符串
+            if not isinstance(markdown_text, str):
+                markdown_text = str(markdown_text)
+                
+            logger.info(f"Validated markdown_text length: {len(markdown_text)}")
+            
+        except Exception as e:
+            logger.error(f"Error validating markdown_text parameter: {str(e)}")
+            return {"success": False, "error": f"Invalid markdown_text parameter: {str(e)}"}
         temp_dir = tempfile.mkdtemp()
         temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
         temp_docx_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
