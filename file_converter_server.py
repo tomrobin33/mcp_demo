@@ -26,13 +26,14 @@ import traceback
 import requests
 from typing import Optional
 from weasyprint import HTML
+from sftp_upload_helper import upload_to_static_server
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stderr)  # 将日志输出到stderr而不是stdout
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger("file_converter_mcp")
@@ -238,215 +239,33 @@ def debug_json_response(response):
 original_parse_json = mcp.parse_json if hasattr(mcp, 'parse_json') else None
 
 def enhanced_parse_json(text):
-    """Enhanced JSON parsing with detailed error information and format fixing"""
+    """Enhanced JSON parsing with detailed error information"""
     try:
-        # 首先尝试直接解析
-        return json.loads(text)
-    except json.JSONDecodeError as e:
-        logger.warning(f"Initial JSON parsing failed: {str(e)}")
-        logger.info(f"Attempting to fix JSON format...")
-        
-        # 尝试修复常见的JSON格式问题
-        fixed_text = text
-        
-        # 1. 移除可能的非JSON前缀
-        if fixed_text and not fixed_text.strip().startswith('{') and not fixed_text.strip().startswith('['):
-            json_start = fixed_text.find('{')
+        # Check if there's a non-JSON prefix
+        if text and not text.strip().startswith('{') and not text.strip().startswith('['):
+            # Try to find the start of JSON
+            json_start = text.find('{')
             if json_start == -1:
-                json_start = fixed_text.find('[')
+                json_start = text.find('[')
             
             if json_start > 0:
-                logger.info(f"Removing non-JSON prefix: '{fixed_text[:json_start]}'")
-                fixed_text = fixed_text[json_start:]
+                logger.warning(f"Found non-JSON prefix: '{text[:json_start]}'")
+                text = text[json_start:]
+                logger.info(f"Stripped prefix, new text: '{text[:100]}...'")
         
-        # 2. 处理可能的尾随字符
-        if fixed_text and not fixed_text.strip().endswith('}') and not fixed_text.strip().endswith(']'):
-            json_end = fixed_text.rfind('}')
-            if json_end == -1:
-                json_end = fixed_text.rfind(']')
-            
-            if json_end > 0:
-                logger.info(f"Removing trailing characters after JSON")
-                fixed_text = fixed_text[:json_end+1]
-        
-        # 3. 尝试修复常见的转义问题
-        try:
-            return json.loads(fixed_text)
-        except json.JSONDecodeError as e2:
-            logger.warning(f"Fixed JSON parsing also failed: {str(e2)}")
-            
-            # 4. 尝试更激进的修复 - 处理可能的markdown内容中的特殊字符
-            try:
-                # 如果看起来像是markdown内容，尝试包装成正确的JSON格式
-                if '"markdown_text"' in fixed_text or 'markdown_text' in fixed_text:
-                    # 提取markdown内容
-                    if '"markdown_text":' in fixed_text:
-                        # 找到markdown_text的值部分
-                        start_idx = fixed_text.find('"markdown_text":') + len('"markdown_text":')
-                        # 跳过空白字符
-                        while start_idx < len(fixed_text) and fixed_text[start_idx].isspace():
-                            start_idx += 1
-                        
-                        if start_idx < len(fixed_text):
-                            # 提取值部分
-                            if fixed_text[start_idx] == '"':
-                                # 处理字符串值
-                                start_idx += 1
-                                end_idx = start_idx
-                                while end_idx < len(fixed_text):
-                                    if fixed_text[end_idx] == '"' and fixed_text[end_idx-1] != '\\':
-                                        break
-                                    end_idx += 1
-                                markdown_content = fixed_text[start_idx:end_idx]
-                            else:
-                                # 处理非字符串值，尝试提取到下一个逗号或大括号
-                                end_idx = start_idx
-                                brace_count = 0
-                                while end_idx < len(fixed_text):
-                                    if fixed_text[end_idx] == '{':
-                                        brace_count += 1
-                                    elif fixed_text[end_idx] == '}':
-                                        brace_count -= 1
-                                        if brace_count < 0:
-                                            break
-                                    elif fixed_text[end_idx] == ',' and brace_count == 0:
-                                        break
-                                    end_idx += 1
-                                markdown_content = fixed_text[start_idx:end_idx]
-                            
-                            # 创建正确的JSON格式
-                            fixed_json = f'{{"markdown_text": {json.dumps(markdown_content)}}}'
-                            logger.info(f"Created fixed JSON: {fixed_json[:100]}...")
-                            return json.loads(fixed_json)
-                
-                # 5. 最后的尝试 - 如果内容看起来像markdown，直接包装
-                if fixed_text.strip().startswith('#') or '##' in fixed_text:
-                    logger.info("Content appears to be markdown, wrapping in JSON format")
-                    fixed_json = f'{{"markdown_text": {json.dumps(fixed_text.strip())}}}'
-                    return json.loads(fixed_json)
-                    
-            except Exception as e3:
-                logger.error(f"All JSON fixing attempts failed: {str(e3)}")
-            
-            # 如果所有修复都失败，记录详细信息并抛出原始错误
-            logger.error(f"JSON parsing error: {str(e)}")
-            logger.error(f"Problematic string: '{text}'")
-            logger.error(f"Position {e.pos}: {text[max(0, e.pos-10):e.pos]}[HERE>{text[e.pos:e.pos+1]}<HERE]{text[e.pos+1:min(len(text), e.pos+10)]}")
-            logger.error(f"Full error: {traceback.format_exc()}")
-            raise
-
-def fix_reasoning_format(text):
-    """修复推理格式问题，添加必要的标识字段"""
-    try:
-        logger.info("Attempting to fix reasoning format...")
-        
-        # 检查是否包含推理格式错误信息
-        if "Agent节点执行失败" in text or "无效的推理格式" in text or "缺少必要的标识字段" in text:
-            logger.info("Detected reasoning format error, attempting to extract content")
-            
-            # 尝试提取实际内容
-            # 1. 查找可能的JSON内容
-            json_start = text.find('{')
-            if json_start != -1:
-                json_end = text.rfind('}')
-                if json_end > json_start:
-                    json_content = text[json_start:json_end+1]
-                    try:
-                        parsed = json.loads(json_content)
-                        logger.info("Successfully extracted JSON content from reasoning error")
-                        return parsed
-                    except:
-                        pass
-            
-            # 2. 查找可能的markdown内容
-            if '#' in text:
-                # 找到第一个#的位置
-                md_start = text.find('#')
-                if md_start != -1:
-                    markdown_content = text[md_start:].strip()
-                    logger.info("Extracted markdown content from reasoning error")
-                    return {"markdown_text": markdown_content}
-            
-            # 3. 如果都没有找到，尝试包装整个内容
-            logger.info("No specific content found, wrapping entire text")
-            return {"markdown_text": text.strip()}
-        
-        # 如果不是推理格式错误，直接返回原内容
-        return text
-        
-    except Exception as e:
-        logger.error(f"Error fixing reasoning format: {str(e)}")
-        return text
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing error: {str(e)}")
+        logger.error(f"Problematic string: '{text}'")
+        logger.error(f"Position {e.pos}: {text[max(0, e.pos-10):e.pos]}[HERE>{text[e.pos:e.pos+1]}<HERE]{text[e.pos+1:min(len(text), e.pos+10)]}")
+        logger.error(f"Full error: {traceback.format_exc()}")
+        raise
 
 # If mcp has parse_json attribute, replace it
 if hasattr(mcp, 'parse_json'):
     mcp.parse_json = enhanced_parse_json
 else:
     logger.warning("Cannot enhance JSON parsing, mcp object doesn't have parse_json attribute")
-
-def validate_and_fix_mcp_parameters(params, expected_params):
-    """
-    验证和修复MCP工具参数
-    
-    Args:
-        params: 大模型返回的参数
-        expected_params: 期望的参数格式字典
-    
-    Returns:
-        修复后的参数字典
-    """
-    try:
-        # 如果params是字符串，尝试解析为JSON
-        if isinstance(params, str):
-            try:
-                params = enhanced_parse_json(params)
-            except:
-                # 如果解析失败，尝试包装成JSON
-                logger.warning("Failed to parse params as JSON, attempting to wrap")
-                params = {"markdown_text": params}
-        
-        # 验证必需参数
-        fixed_params = {}
-        for param_name, param_info in expected_params.items():
-            if param_name in params:
-                param_value = params[param_name]
-                expected_type = param_info.get('type', str)
-                
-                # 类型检查和转换
-                if expected_type == str and not isinstance(param_value, str):
-                    param_value = str(param_value)
-                elif expected_type == int and not isinstance(param_value, int):
-                    try:
-                        param_value = int(param_value)
-                    except:
-                        logger.warning(f"Could not convert {param_name} to int, using default")
-                        param_value = param_info.get('default', 0)
-                
-                fixed_params[param_name] = param_value
-            elif param_info.get('required', False):
-                # 必需参数缺失
-                default_value = param_info.get('default')
-                if default_value is not None:
-                    fixed_params[param_name] = default_value
-                    logger.warning(f"Missing required parameter {param_name}, using default: {default_value}")
-                else:
-                    raise ValueError(f"Missing required parameter: {param_name}")
-        
-        return fixed_params
-        
-    except Exception as e:
-        logger.error(f"Error validating MCP parameters: {str(e)}")
-        # 返回默认参数
-        return {name: info.get('default', '') for name, info in expected_params.items()}
-
-# 定义markdown2docx工具的期望参数格式
-MARKDOWN2DOCX_PARAMS = {
-    'markdown_text': {
-        'type': str,
-        'required': True,
-        'default': ''
-    }
-}
 
 # 辅助函数：判断input_file是否为URL并自动下载
 
@@ -667,7 +486,6 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             logger.info(f"已成功保存输出文件到: {output_file}")
             # === 集成自动上传到静态服务器 ===
             try:
-                from upload_to_server import upload_to_static_server
                 remote_file = f"/root/files/{os.path.basename(output_file)}"
                 hostname = "8.156.74.79"
                 username = "root"
@@ -921,7 +739,6 @@ def convert_html_to_docx(input_file: Optional[str] = None, html_content: Optiona
             logger.info(f"已成功保存输出文件到: {output_file}")
             # === 集成自动上传到静态服务器 ===
             try:
-                from upload_to_server import upload_to_static_server
                 remote_file = f"/root/files/{os.path.basename(output_file)}"
                 hostname = "8.156.74.79"
                 username = "root"
@@ -1110,40 +927,6 @@ def markdown2docx(markdown_text: str) -> dict:
     import tempfile, os, time, shutil, subprocess
     try:
         logger.info("Starting Markdown to DOCX conversion")
-        
-        # 验证和修复参数
-        try:
-            # 首先检查是否是推理格式错误
-            if isinstance(markdown_text, str) and ("Agent节点执行失败" in markdown_text or "无效的推理格式" in markdown_text):
-                logger.info("Detected reasoning format error, attempting to fix")
-                fixed_result = fix_reasoning_format(markdown_text)
-                if isinstance(fixed_result, dict) and 'markdown_text' in fixed_result:
-                    markdown_text = fixed_result['markdown_text']
-                    logger.info("Successfully fixed reasoning format")
-                elif isinstance(fixed_result, str):
-                    markdown_text = fixed_result
-                    logger.info("Fixed reasoning format, extracted string content")
-            
-            # 如果markdown_text是字典或JSON字符串，尝试提取实际内容
-            if isinstance(markdown_text, dict):
-                if 'markdown_text' in markdown_text:
-                    markdown_text = markdown_text['markdown_text']
-                else:
-                    # 尝试找到包含markdown内容的键
-                    for key, value in markdown_text.items():
-                        if isinstance(value, str) and ('#' in value or 'markdown' in key.lower()):
-                            markdown_text = value
-                            break
-            
-            # 确保markdown_text是字符串
-            if not isinstance(markdown_text, str):
-                markdown_text = str(markdown_text)
-                
-            logger.info(f"Validated markdown_text length: {len(markdown_text)}")
-            
-        except Exception as e:
-            logger.error(f"Error validating markdown_text parameter: {str(e)}")
-            return {"success": False, "error": f"Invalid markdown_text parameter: {str(e)}"}
         temp_dir = tempfile.mkdtemp()
         temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
         temp_docx_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
@@ -1187,7 +970,6 @@ def markdown2docx(markdown_text: str) -> dict:
             logger.info(f"已成功保存输出文件到: {output_file}")
             # 自动上传到静态服务器
             try:
-                from upload_to_server import upload_to_static_server
                 remote_file = f"/root/files/{os.path.basename(output_file)}"
                 hostname = "8.156.74.79"
                 username = "root"
@@ -1323,6 +1105,142 @@ def upload_pdf_to_server(input_file: str = None, file_content_base64: str = None
     
     except Exception as e:
         logger.error(f"Unexpected error in upload_pdf_to_server: {str(e)}")
+        return {"success": False, "error": f"Unexpected error: {str(e)}"}
+
+# Upload file to server tool (通用文件上传工具)
+@mcp.tool("upload_file_to_server")
+def upload_file_to_server(input_file: str = None, file_content_base64: str = None, file_format: str = None) -> dict:
+    """
+    上传文件到服务器并返回公网下载链接，支持各种文件格式包括Word文档、PDF、图片等
+    
+    Args:
+        input_file: 文件路径（支持本地文件路径或URL）
+        file_content_base64: 文件的Base64编码内容
+        file_format: 文件格式（如docx, pdf, jpg等），如果不提供则自动检测
+    
+    Returns:
+        dict: 包含上传结果和下载链接的字典
+    """
+    try:
+        logger.info("Starting file upload to server")
+        temp_files = []
+        
+        # 处理输入文件
+        if input_file:
+            if input_file.startswith("http://") or input_file.startswith("https://"):
+                try:
+                    # 自动检测文件格式
+                    if file_format:
+                        suffix = f".{file_format.lower()}"
+                    else:
+                        # 从URL中提取文件扩展名
+                        url_path = input_file.split("?")[0]  # 移除查询参数
+                        suffix = os.path.splitext(url_path)[1]
+                        if not suffix:
+                            suffix = ".file"  # 默认后缀
+                    
+                    input_file = download_url_to_tempfile(input_file, suffix)
+                    temp_files.append(input_file)
+                    logger.info(f"已下载文件到临时文件: {input_file}")
+                except Exception as e:
+                    logger.error(f"下载文件失败: {str(e)}")
+                    return {"success": False, "error": f"Error downloading file from URL: {str(e)}"}
+            
+            # 验证文件存在
+            try:
+                actual_file_path = validate_file_exists(input_file)
+                logger.info(f"找到文件: {actual_file_path}")
+            except Exception as e:
+                logger.error(f"文件验证失败: {str(e)}")
+                return {"success": False, "error": f"File validation failed: {str(e)}"}
+        
+        elif file_content_base64:
+            # 从Base64内容创建临时文件
+            if not file_format:
+                return {"success": False, "error": "file_format is required when using file_content_base64"}
+            
+            temp_dir = tempfile.mkdtemp()
+            temp_file = os.path.join(temp_dir, f"file_{int(time.time())}.{file_format.lower()}")
+            try:
+                file_content = base64.b64decode(file_content_base64)
+                with open(temp_file, "wb") as f:
+                    f.write(file_content)
+                actual_file_path = temp_file
+                temp_files.append(temp_file)
+                logger.info(f"已从Base64创建临时文件: {temp_file}")
+            except Exception as e:
+                logger.error(f"Base64解码失败: {str(e)}")
+                return {"success": False, "error": f"Error decoding Base64 content: {str(e)}"}
+        else:
+            return {"success": False, "error": "You must provide either input_file or file_content_base64"}
+        
+        # 验证文件
+        if not os.path.exists(actual_file_path):
+            return {"success": False, "error": f"File not found: {actual_file_path}"}
+        
+        file_size = os.path.getsize(actual_file_path)
+        if file_size == 0:
+            return {"success": False, "error": "File is empty"}
+        
+        # 获取文件格式
+        if not file_format:
+            file_format = os.path.splitext(actual_file_path)[1].lstrip('.')
+            if not file_format:
+                file_format = "file"
+        
+        logger.info(f"文件大小: {file_size} 字节, 格式: {file_format}")
+        
+        # 上传到服务器
+        try:
+            from upload_to_server import upload_to_static_server
+            
+            # 生成远程文件名
+            filename = os.path.basename(actual_file_path)
+            if not filename.lower().endswith(f'.{file_format.lower()}'):
+                filename = f"{filename}.{file_format.lower()}"
+            
+            remote_file = f"/root/files/{filename}"
+            hostname = "8.156.74.79"
+            username = "root"
+            password = "zfsZBC123."
+            
+            logger.info(f"开始上传文件到服务器: {remote_file}")
+            upload_success = upload_to_static_server(actual_file_path, remote_file, hostname, username, password)
+            
+            if not upload_success:
+                logger.error(f"文件上传到服务器失败: {remote_file}")
+                return {"success": False, "error": f"Failed to upload file to server: {remote_file}"}
+            
+            # 生成下载链接
+            download_url = get_download_url(filename)
+            logger.info(f"文件上传成功，下载链接: {download_url}")
+            
+            return {
+                "success": True,
+                "message": f"{file_format.upper()} file uploaded successfully",
+                "filename": filename,
+                "file_size": file_size,
+                "file_format": file_format,
+                "download_url": download_url,
+                "upload_result": "success"
+            }
+            
+        except Exception as e:
+            logger.error(f"文件上传异常: {str(e)}")
+            return {"success": False, "error": f"Error uploading file: {str(e)}"}
+        
+        finally:
+            # 清理临时文件
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                        logger.info(f"已清理临时文件: {temp_file}")
+                except Exception as e:
+                    logger.warning(f"清理临时文件失败: {temp_file}, 错误: {str(e)}")
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in upload_file_to_server: {str(e)}")
         return {"success": False, "error": f"Unexpected error: {str(e)}"}
 
 if __name__ == "__main__":

@@ -72,6 +72,7 @@ def main():
         print("  - convert_file: Generic file conversion", file=sys.stderr)
         print("  - convert_content: Convert from base64 content", file=sys.stderr)
         print("  - upload_pdf_to_server: Upload PDF files to server", file=sys.stderr)
+        print("  - upload_file_to_server: Upload any file format to server", file=sys.stderr)
         print("\nStarting server...", file=sys.stderr)
         
         # Run the MCP server

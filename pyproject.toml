@@ -13,6 +13,9 @@ dependencies = [
     "pandas",
     "pdfkit",
     "markdown",
+    "requests",
+    "paramiko",
+    "weasyprint",
 ]
 requires-python = ">=3.10"
 

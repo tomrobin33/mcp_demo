@@ -55,9 +55,9 @@ def upload_to_static_server(local_file, remote_file, hostname, username, passwor
     return True
 
 if __name__ == "__main__":
-    # 支持命令行参数：python upload_to_server.py 本地文件 [远程文件名]
+    # 支持命令行参数：python sftp_upload_helper.py 本地文件 [远程文件名]
     if len(sys.argv) < 2:
-        print("用法: python upload_to_server.py 本地文件 [远程文件名]", file=sys.stderr)
+        print("用法: python sftp_upload_helper.py 本地文件 [远程文件名]", file=sys.stderr)
         sys.exit(1)
     local_file = sys.argv[1]
     if not os.path.exists(local_file):
