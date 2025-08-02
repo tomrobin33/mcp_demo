@@ -781,8 +781,14 @@ def convert_file(input_file: str = None, file_content_base64: str = None, input_
         conversion_map = {
             ("docx", "pdf"): convert_docx_to_pdf,
             ("pdf", "docx"): convert_pdf_to_docx,
-            ("markdown", "pdf"): convert_html_to_pdf,
-            ("md", "pdf"): convert_html_to_pdf,
+            ("markdown", "pdf"): markdown2pdf,
+            ("md", "pdf"): markdown2pdf,
+            ("markdown", "docx"): markdown2docx,
+            ("md", "docx"): markdown2docx,
+            ("html", "pdf"): convert_html_to_pdf,
+            ("html", "docx"): convert_html_to_docx,
+            ("docx", "base64"): lambda **kwargs: {"success": False, "error": "Use upload_file_to_server instead of converting to base64"},
+            ("pdf", "base64"): lambda **kwargs: {"success": False, "error": "Use upload_file_to_server instead of converting to base64"},
         }
         conversion_key = (input_format.lower(), output_format.lower())
         if conversion_key in conversion_map:
