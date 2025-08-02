@@ -1057,7 +1057,7 @@ def upload_pdf_to_server(input_file: str = None, file_content_base64: str = None
         
         # 上传到服务器
         try:
-            from upload_to_server import upload_to_static_server
+            from sftp_upload_helper import upload_to_static_server
             
             # 生成远程文件名
             filename = os.path.basename(actual_file_path)
@@ -1192,7 +1192,7 @@ def upload_file_to_server(input_file: str = None, file_content_base64: str = Non
         
         # 上传到服务器
         try:
-            from upload_to_server import upload_to_static_server
+            from sftp_upload_helper import upload_to_static_server
             
             # 生成远程文件名
             filename = os.path.basename(actual_file_path)

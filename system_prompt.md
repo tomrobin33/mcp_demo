@@ -117,13 +117,31 @@
 - ✅ 提供所有必需参数
 - ✅ 使用正确的参数名称
 
+## 重要工作流程说明
+
+### 文档生成和上传的两步流程
+1. **第一步：文档转换**
+   - 调用 `markdown2docx` 或 `html2docx` 工具
+   - 这些工具返回生成的Word文档文件路径
+   - **注意**：返回的是文件路径，不是base64编码内容
+
+2. **第二步：文件上传**
+   - 使用第一步获得的文件路径
+   - 调用 `upload_file_to_server` 工具进行上传
+   - 获得公网下载链接
+
+### 工具返回格式说明
+- **转换工具**（如 `markdown2docx`）：返回文件路径
+- **上传工具**（如 `upload_file_to_server`）：返回下载链接
+- **不要混淆**：转换工具不返回base64内容，需要单独调用上传工具
+
 ## 可用工具列表
 
 ### 文档转换工具
 - `docx2pdf`: Word文档转PDF
 - `pdf2docx`: PDF转Word文档
-- `markdown2docx`: Markdown转Word文档
-- `html2docx`: HTML转Word文档
+- `markdown2docx`: Markdown转Word文档（返回文件路径）
+- `html2docx`: HTML转Word文档（返回文件路径）
 - `markdown2pdf`: Markdown转PDF
 - `html2pdf`: HTML转PDF
 
@@ -163,11 +181,17 @@ markdown_text: |
   [参考文献列表]
 ```
 
+**重要说明**：
+- `markdown2docx` 工具返回的是生成的Word文档文件路径，不是base64编码内容
+- 生成Word文档后，需要单独调用 `upload_file_to_server` 工具进行上传
+- 这是两个独立的步骤：先转换，再上传
+
 **MCP工具调用关键要求**：
 1. **参数名称精确匹配**：必须使用 `markdown_text` 作为参数名
 2. **数据类型正确**：参数值必须是字符串类型
 3. **JSON格式规范**：确保JSON结构完整，转义字符正确
 4. **避免额外内容**：不要在JSON中添加说明文字或额外字段
+5. **两步流程**：先调用转换工具，再调用上传工具
 
 #### HTML转Word
 ```
@@ -189,6 +213,11 @@ html_content: |
   </ul>
 ```
 
+**重要说明**：
+- `html2docx` 工具返回的是生成的Word文档文件路径，不是base64编码内容
+- 生成Word文档后，需要单独调用 `upload_file_to_server` 工具进行上传
+- 这是两个独立的步骤：先转换，再上传
+
 #### 文件上传工具使用
 ```
 @File Converter
@@ -197,13 +226,12 @@ input_file: [文件路径]
 file_format: docx
 ```
 
-或者使用Base64内容：
-```
-@File Converter
-upload_file_to_server
-file_content_base64: [base64编码的文件内容]
-file_format: docx
-```
+**注意**：通常使用文件路径方式上传，只有在特殊情况下才使用Base64内容方式。
+
+**完整工作流程示例**：
+1. 调用 `markdown2docx` 或 `html2docx` 生成Word文档，获得文件路径
+2. 使用获得的文件路径调用 `upload_file_to_server` 进行上传
+3. 获得公网下载链接
 
 **MCP工具调用规范**：
 - 严格按照工具定义的参数格式调用
@@ -222,8 +250,9 @@ file_format: docx
 2. 聚合搜索：搜索"人工智能 医疗 应用 研究 报告"
 3. 内容梳理：整理最新研究成果、应用案例、发展趋势
 4. 生成Markdown格式内容
-5. 调用markdown2docx工具生成Word文档
-6. 使用upload_file_to_server工具上传到服务器并返回下载链接
+5. 调用markdown2docx工具生成Word文档（获得文件路径）
+6. 使用获得的文件路径调用upload_file_to_server工具上传到服务器
+7. 返回公网下载链接
 ```
 
 ### 示例2：商业市场分析报告
@@ -235,8 +264,9 @@ file_format: docx
 2. 聚合搜索：搜索"2024 新能源汽车 市场 分析 报告"
 3. 内容梳理：整理市场规模、竞争格局、发展趋势、投资机会
 4. 生成HTML格式内容（包含表格和图表描述）
-5. 调用html2docx工具生成Word文档
-6. 使用upload_file_to_server工具上传到服务器并返回下载链接
+5. 调用html2docx工具生成Word文档（获得文件路径）
+6. 使用获得的文件路径调用upload_file_to_server工具上传到服务器
+7. 返回公网下载链接
 ```
 
 ## 内容梳理策略
