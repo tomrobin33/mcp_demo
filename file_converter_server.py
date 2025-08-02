@@ -688,7 +688,34 @@ def convert_html_to_pdf(input_file: Optional[str] = None, html_content: Optional
 @mcp.tool("html2docx")
 def convert_html_to_docx(input_file: Optional[str] = None, html_content: Optional[str] = None) -> dict:
     """
-    Convert an HTML file to DOCX format using Pandoc. 支持文件路径、URL、明文HTML字符串输入。
+    HTML转Word文档工具
+    
+    🚨 重要：MCP工具调用格式说明
+    ================================
+    
+    正确的调用格式：
+    @File Converter
+    html2docx
+    html_content: |
+      <h1>文档标题</h1>
+      <h2>章节标题</h2>
+      <p>章节内容</p>
+    
+    错误的调用格式：
+    ❌ html_content: {"html_content": "<h1>标题</h1>"}  # 嵌套JSON对象错误
+    ❌ html: "<h1>标题</h1>"  # 参数名错误
+    
+    关键原则：
+    - 参数值必须是直接的字符串，不能包装在JSON对象中
+    - 使用正确的参数名：html_content
+    - 避免嵌套JSON结构
+    
+    Args:
+        input_file (Optional[str]): HTML文件路径或URL
+        html_content (Optional[str]): HTML格式的文本内容
+        
+    Returns:
+        dict: 包含转换结果和下载链接的字典
     """
     import shutil
     import subprocess
@@ -967,6 +994,35 @@ def markdown2pdf(markdown_text: str) -> dict:
 # Markdown to DOCX
 @mcp.tool("markdown2docx")
 def markdown2docx(markdown_text: str) -> dict:
+    """
+    Markdown转Word文档工具
+    
+    🚨 重要：MCP工具调用格式说明
+    ================================
+    
+    正确的调用格式：
+    @File Converter
+    markdown2docx
+    markdown_text: |
+      # 文档标题
+      ## 章节标题
+      章节内容
+    
+    错误的调用格式：
+    ❌ markdown_text: {"markdown_text": "# 标题\n内容"}  # 嵌套JSON对象错误
+    ❌ markdown: "# 标题\n内容"  # 参数名错误
+    
+    关键原则：
+    - 参数值必须是直接的字符串，不能包装在JSON对象中
+    - 使用正确的参数名：markdown_text
+    - 避免嵌套JSON结构
+    
+    Args:
+        markdown_text (str): Markdown格式的文本内容
+        
+    Returns:
+        dict: 包含转换结果和下载链接的字典
+    """
     import tempfile, os, time, shutil, subprocess
     try:
         logger.info("Starting Markdown to DOCX conversion")
