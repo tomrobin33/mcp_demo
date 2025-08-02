@@ -800,32 +800,16 @@ def convert_html_to_docx(input_file: Optional[str] = None, html_content: Optiona
         shutil.rmtree(temp_dir)
         for f in temp_files:
             os.remove(f)
-        result_data = {
+        return {
             "success": True, 
             "output_file": output_file, 
             "download_url": get_download_url(os.path.basename(output_file)),
             "message": "HTML to DOCX conversion completed successfully",
             "filename": os.path.basename(output_file)
         }
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(result_data, ensure_ascii=False, indent=2)
-                }
-            ]
-        }
     except Exception as e:
         logger.error(f"Unexpected error in convert_html_to_docx: {str(e)}")
-        error_data = {"success": False, "error": f"Error converting HTML to DOCX: {str(e)}"}
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(error_data, ensure_ascii=False, indent=2)
-                }
-            ]
-        }
+        return {"success": False, "error": f"Error converting HTML to DOCX: {str(e)}"}
 
 # Generic file conversion tool using file paths
 @mcp.tool("convert_file")
@@ -1050,32 +1034,16 @@ def markdown2docx(markdown_text: str) -> dict:
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"Error moving output file: {str(e)}"}
         shutil.rmtree(temp_dir)
-        result_data = {
+        return {
             "success": True, 
             "output_file": output_file, 
             "download_url": get_download_url(os.path.basename(output_file)),
             "message": "Markdown to DOCX conversion completed successfully",
             "filename": os.path.basename(output_file)
         }
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(result_data, ensure_ascii=False, indent=2)
-                }
-            ]
-        }
     except Exception as e:
         logger.error(f"Unexpected error in markdown2docx: {str(e)}")
-        error_data = {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(error_data, ensure_ascii=False, indent=2)
-                }
-            ]
-        }
+        return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
 
 # Upload PDF to server tool
 @mcp.tool("upload_pdf_to_server")
