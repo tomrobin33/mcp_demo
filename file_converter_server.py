@@ -1042,7 +1042,7 @@ def markdown2docx(markdown_text: str) -> dict:
         try:
             result = subprocess.run([
                 "pandoc", temp_md_file, "-o", temp_docx_file
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)  # 30秒超时
             if result.returncode != 0:
                 logger.error(f"Pandoc 转换失败: {result.stderr.decode('utf-8')}")
                 shutil.rmtree(temp_dir)
@@ -1067,7 +1067,7 @@ def markdown2docx(markdown_text: str) -> dict:
         try:
             shutil.move(temp_docx_file, output_file)
             logger.info(f"已成功保存输出文件到: {output_file}")
-            # 自动上传到静态服务器
+            # 自动上传到静态服务器（可选，避免阻塞）
             try:
                 if 'SFTP_AVAILABLE' in globals() and SFTP_AVAILABLE:
                     from sftp_upload_helper import upload_to_static_server
@@ -1075,16 +1075,20 @@ def markdown2docx(markdown_text: str) -> dict:
                     hostname = "8.156.74.79"
                     username = "root"
                     password = "zfsZBC123."
-                    upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
-                    if not upload_success:
-                        logger.error(f"自动上传到静态服务器失败: {remote_file}")
-                        return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
-                    logger.info(f"自动上传到静态服务器成功: {remote_file}")
+                    
+                    # 尝试上传，但不阻塞主要流程
+                    try:
+                        upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
+                        if upload_success:
+                            logger.info(f"自动上传到静态服务器成功: {remote_file}")
+                        else:
+                            logger.warning(f"自动上传失败，但不影响文档生成: {remote_file}")
+                    except Exception as upload_e:
+                        logger.warning(f"上传异常，但不影响文档生成: {str(upload_e)}")
                 else:
                     logger.warning("SFTP功能不可用，跳过自动上传")
             except Exception as e:
-                logger.error(f"自动上传到静态服务器异常: {str(e)}")
-                return {"success": False, "error": f"自动上传到静态服务器异常: {str(e)}"}
+                logger.warning(f"上传配置异常，但不影响文档生成: {str(e)}")
         except Exception as e:
             logger.error(f"移动输出文件失败: {str(e)}")
             shutil.rmtree(temp_dir)

@@ -19,40 +19,27 @@ def upload_to_static_server(local_file, remote_file, hostname, username, passwor
     except Exception as e:
         logger.error(f"本地文件无法打开: {local_file}, 错误: {e}")
         return False
-    # 3. 上传文件
-    transport = paramiko.Transport((hostname, port))
-    transport.connect(username=username, password=password)
-    sftp = paramiko.SFTPClient.from_transport(transport)
+    # 3. 上传文件（添加超时机制）
     try:
-        sftp.put(local_file, remote_file)
+        transport = paramiko.Transport((hostname, port))
+        transport.connect(username=username, password=password, timeout=10)  # 10秒超时
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        sftp.put(local_file, remote_file, timeout=30)  # 30秒上传超时
         logger.info(f"上传成功: {remote_file}")
-        # 4. 检查远程文件是否存在
-        try:
-            sftp.stat(remote_file)
-            logger.info(f"远程服务器已存在文件: {remote_file}")
-        except FileNotFoundError:
-            logger.error(f"远程服务器未找到文件: {remote_file}")
-            return False
-        # 5. ls远程目录内容
-        try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(hostname, username=username, password=password)
-            remote_dir = os.path.dirname(remote_file)
-            stdin, stdout, stderr = ssh.exec_command(f"ls -l {remote_dir}")
-            logger.info(f"远程目录({remote_dir})内容:\n" + stdout.read().decode())
-            ssh.close()
-        except Exception as e:
-            logger.warning(f"远程ls目录失败: {e}")
     except Exception as e:
-        logger.error(f"上传失败: {e}")
+        logger.error(f"SFTP上传失败: {e}")
         return False
     finally:
-        sftp.close()
-        transport.close()
-    logger.info(f"上传完成: {remote_file}")
-    logger.info(f"公网下载链接：http://{hostname}:8001/{os.path.basename(local_file)}")
-    return True
+        try:
+            sftp.close()
+            transport.close()
+        except:
+            pass
+    try:
+        sftp.put(local_file, remote_file)
+        logger.info(f"上传完成: {remote_file}")
+        logger.info(f"公网下载链接：http://{hostname}:8001/{os.path.basename(local_file)}")
+        return True
 
 if __name__ == "__main__":
     # 支持命令行参数：python sftp_upload_helper.py 本地文件 [远程文件名]
