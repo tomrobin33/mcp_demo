@@ -28,6 +28,14 @@ from typing import Optional
 # weasyprint将在需要时动态导入
 WEASYPRINT_AVAILABLE = None
 
+# SFTP功能可用性检查
+try:
+    import paramiko
+    SFTP_AVAILABLE = True
+except ImportError:
+    SFTP_AVAILABLE = False
+    logger.warning("paramiko 不可用，SFTP上传功能将被禁用")
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -792,7 +800,13 @@ def convert_html_to_docx(input_file: Optional[str] = None, html_content: Optiona
         shutil.rmtree(temp_dir)
         for f in temp_files:
             os.remove(f)
-        return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
+        return {
+            "success": True, 
+            "output_file": output_file, 
+            "download_url": get_download_url(os.path.basename(output_file)),
+            "message": "HTML to DOCX conversion completed successfully",
+            "filename": os.path.basename(output_file)
+        }
     except Exception as e:
         logger.error(f"Unexpected error in convert_html_to_docx: {str(e)}")
         return {"success": False, "error": f"Error converting HTML to DOCX: {str(e)}"}
@@ -1020,7 +1034,13 @@ def markdown2docx(markdown_text: str) -> dict:
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"Error moving output file: {str(e)}"}
         shutil.rmtree(temp_dir)
-        return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
+        return {
+            "success": True, 
+            "output_file": output_file, 
+            "download_url": get_download_url(os.path.basename(output_file)),
+            "message": "Markdown to DOCX conversion completed successfully",
+            "filename": os.path.basename(output_file)
+        }
     except Exception as e:
         logger.error(f"Unexpected error in markdown2docx: {str(e)}")
         return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
