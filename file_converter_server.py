@@ -25,8 +25,8 @@ import time
 import traceback
 import requests
 from typing import Optional
-from weasyprint import HTML
-from sftp_upload_helper import upload_to_static_server
+# weasyprint将在需要时动态导入
+WEASYPRINT_AVAILABLE = None
 
 # Set up logging
 logging.basicConfig(
@@ -309,7 +309,14 @@ def download_url_to_tempfile(url, suffix):
 # 在OUTPUT_DIR定义后自动创建目录
 OUTPUT_DIR = "/root/files"
 import os
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+try:
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    logger.info(f"输出目录已创建或已存在: {OUTPUT_DIR}")
+except Exception as e:
+    logger.warning(f"无法创建输出目录 {OUTPUT_DIR}: {e}")
+    # 使用临时目录作为备选
+    OUTPUT_DIR = tempfile.gettempdir()
+    logger.info(f"使用临时目录作为输出目录: {OUTPUT_DIR}")
 
 def get_download_url(filename):
     host = "8.156.74.79"
@@ -486,15 +493,19 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             logger.info(f"已成功保存输出文件到: {output_file}")
             # === 集成自动上传到静态服务器 ===
             try:
-                remote_file = f"/root/files/{os.path.basename(output_file)}"
-                hostname = "8.156.74.79"
-                username = "root"
-                password = "zfsZBC123."
-                upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
-                if not upload_success:
-                    logger.error(f"自动上传到静态服务器失败: {remote_file}")
-                    return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
-                logger.info(f"自动上传到静态服务器成功: {remote_file}")
+                if 'SFTP_AVAILABLE' in globals() and SFTP_AVAILABLE:
+                    from sftp_upload_helper import upload_to_static_server
+                    remote_file = f"/root/files/{os.path.basename(output_file)}"
+                    hostname = "8.156.74.79"
+                    username = "root"
+                    password = "zfsZBC123."
+                    upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
+                    if not upload_success:
+                        logger.error(f"自动上传到静态服务器失败: {remote_file}")
+                        return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
+                    logger.info(f"自动上传到静态服务器成功: {remote_file}")
+                else:
+                    logger.warning("SFTP功能不可用，跳过自动上传")
             except Exception as e:
                 logger.error(f"自动上传到静态服务器异常: {str(e)}")
                 return {"success": False, "error": f"自动上传到静态服务器异常: {str(e)}"}
@@ -633,6 +644,20 @@ def convert_excel_to_csv(input_file: str) -> dict:
 @mcp.tool("html2pdf")
 def convert_html_to_pdf(input_file: Optional[str] = None, html_content: Optional[str] = None) -> dict:
     try:
+        # 动态检查weasyprint可用性
+        global WEASYPRINT_AVAILABLE
+        if WEASYPRINT_AVAILABLE is None:
+            try:
+                from weasyprint import HTML
+                WEASYPRINT_AVAILABLE = True
+            except ImportError:
+                WEASYPRINT_AVAILABLE = False
+                logger.warning("weasyprint 不可用，HTML转PDF功能将被禁用")
+        
+        if not WEASYPRINT_AVAILABLE:
+            return {"success": False, "error": "weasyprint 不可用，HTML转PDF功能被禁用"}
+        
+        from weasyprint import HTML
         import tempfile, os, time, shutil
         temp_dir = tempfile.mkdtemp()
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
@@ -739,15 +764,19 @@ def convert_html_to_docx(input_file: Optional[str] = None, html_content: Optiona
             logger.info(f"已成功保存输出文件到: {output_file}")
             # === 集成自动上传到静态服务器 ===
             try:
-                remote_file = f"/root/files/{os.path.basename(output_file)}"
-                hostname = "8.156.74.79"
-                username = "root"
-                password = "zfsZBC123."
-                upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
-                if not upload_success:
-                    logger.error(f"自动上传到静态服务器失败: {remote_file}")
-                    return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
-                logger.info(f"自动上传到静态服务器成功: {remote_file}")
+                if 'SFTP_AVAILABLE' in globals() and SFTP_AVAILABLE:
+                    from sftp_upload_helper import upload_to_static_server
+                    remote_file = f"/root/files/{os.path.basename(output_file)}"
+                    hostname = "8.156.74.79"
+                    username = "root"
+                    password = "zfsZBC123."
+                    upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
+                    if not upload_success:
+                        logger.error(f"自动上传到静态服务器失败: {remote_file}")
+                        return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
+                    logger.info(f"自动上传到静态服务器成功: {remote_file}")
+                else:
+                    logger.warning("SFTP功能不可用，跳过自动上传")
             except Exception as e:
                 logger.error(f"自动上传到静态服务器异常: {str(e)}")
                 return {"success": False, "error": f"自动上传到静态服务器异常: {str(e)}"}
@@ -781,14 +810,8 @@ def convert_file(input_file: str = None, file_content_base64: str = None, input_
         conversion_map = {
             ("docx", "pdf"): convert_docx_to_pdf,
             ("pdf", "docx"): convert_pdf_to_docx,
-            ("markdown", "pdf"): markdown2pdf,
-            ("md", "pdf"): markdown2pdf,
-            ("markdown", "docx"): markdown2docx,
-            ("md", "docx"): markdown2docx,
-            ("html", "pdf"): convert_html_to_pdf,
-            ("html", "docx"): convert_html_to_docx,
-            ("docx", "base64"): lambda **kwargs: {"success": False, "error": "Use upload_file_to_server instead of converting to base64"},
-            ("pdf", "base64"): lambda **kwargs: {"success": False, "error": "Use upload_file_to_server instead of converting to base64"},
+            ("markdown", "pdf"): convert_html_to_pdf,
+            ("md", "pdf"): convert_html_to_pdf,
         }
         conversion_key = (input_format.lower(), output_format.lower())
         if conversion_key in conversion_map:
@@ -976,15 +999,19 @@ def markdown2docx(markdown_text: str) -> dict:
             logger.info(f"已成功保存输出文件到: {output_file}")
             # 自动上传到静态服务器
             try:
-                remote_file = f"/root/files/{os.path.basename(output_file)}"
-                hostname = "8.156.74.79"
-                username = "root"
-                password = "zfsZBC123."
-                upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
-                if not upload_success:
-                    logger.error(f"自动上传到静态服务器失败: {remote_file}")
-                    return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
-                logger.info(f"自动上传到静态服务器成功: {remote_file}")
+                if 'SFTP_AVAILABLE' in globals() and SFTP_AVAILABLE:
+                    from sftp_upload_helper import upload_to_static_server
+                    remote_file = f"/root/files/{os.path.basename(output_file)}"
+                    hostname = "8.156.74.79"
+                    username = "root"
+                    password = "zfsZBC123."
+                    upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
+                    if not upload_success:
+                        logger.error(f"自动上传到静态服务器失败: {remote_file}")
+                        return {"success": False, "error": f"自动上传到静态服务器失败: {remote_file}"}
+                    logger.info(f"自动上传到静态服务器成功: {remote_file}")
+                else:
+                    logger.warning("SFTP功能不可用，跳过自动上传")
             except Exception as e:
                 logger.error(f"自动上传到静态服务器异常: {str(e)}")
                 return {"success": False, "error": f"自动上传到静态服务器异常: {str(e)}"}
@@ -1063,37 +1090,41 @@ def upload_pdf_to_server(input_file: str = None, file_content_base64: str = None
         
         # 上传到服务器
         try:
-            from sftp_upload_helper import upload_to_static_server
-            
-            # 生成远程文件名
-            filename = os.path.basename(actual_file_path)
-            if not filename.lower().endswith('.pdf'):
-                filename = f"{filename}.pdf"
-            
-            remote_file = f"/root/files/{filename}"
-            hostname = "8.156.74.79"
-            username = "root"
-            password = "zfsZBC123."
-            
-            logger.info(f"开始上传PDF到服务器: {remote_file}")
-            upload_success = upload_to_static_server(actual_file_path, remote_file, hostname, username, password)
-            
-            if not upload_success:
-                logger.error(f"PDF上传到服务器失败: {remote_file}")
-                return {"success": False, "error": f"Failed to upload PDF to server: {remote_file}"}
-            
-            # 生成下载链接
-            download_url = get_download_url(filename)
-            logger.info(f"PDF上传成功，下载链接: {download_url}")
-            
-            return {
-                "success": True,
-                "message": "PDF uploaded successfully",
-                "filename": filename,
-                "file_size": file_size,
-                "download_url": download_url,
-                "upload_result": "success"
-            }
+            if 'SFTP_AVAILABLE' in globals() and SFTP_AVAILABLE:
+                from sftp_upload_helper import upload_to_static_server
+                
+                # 生成远程文件名
+                filename = os.path.basename(actual_file_path)
+                if not filename.lower().endswith('.pdf'):
+                    filename = f"{filename}.pdf"
+                
+                remote_file = f"/root/files/{filename}"
+                hostname = "8.156.74.79"
+                username = "root"
+                password = "zfsZBC123."
+                
+                logger.info(f"开始上传PDF到服务器: {remote_file}")
+                upload_success = upload_to_static_server(actual_file_path, remote_file, hostname, username, password)
+                
+                if not upload_success:
+                    logger.error(f"PDF上传到服务器失败: {remote_file}")
+                    return {"success": False, "error": f"Failed to upload PDF to server: {remote_file}"}
+                
+                # 生成下载链接
+                download_url = get_download_url(filename)
+                logger.info(f"PDF上传成功，下载链接: {download_url}")
+                
+                return {
+                    "success": True,
+                    "message": "PDF uploaded successfully",
+                    "filename": filename,
+                    "file_size": file_size,
+                    "download_url": download_url,
+                    "upload_result": "success"
+                }
+            else:
+                logger.warning("SFTP功能不可用，无法上传PDF")
+                return {"success": False, "error": "SFTP功能不可用，无法上传PDF"}
             
         except Exception as e:
             logger.error(f"PDF上传异常: {str(e)}")
@@ -1111,142 +1142,6 @@ def upload_pdf_to_server(input_file: str = None, file_content_base64: str = None
     
     except Exception as e:
         logger.error(f"Unexpected error in upload_pdf_to_server: {str(e)}")
-        return {"success": False, "error": f"Unexpected error: {str(e)}"}
-
-# Upload file to server tool (通用文件上传工具)
-@mcp.tool("upload_file_to_server")
-def upload_file_to_server(input_file: str = None, file_content_base64: str = None, file_format: str = None) -> dict:
-    """
-    上传文件到服务器并返回公网下载链接，支持各种文件格式包括Word文档、PDF、图片等
-    
-    Args:
-        input_file: 文件路径（支持本地文件路径或URL）
-        file_content_base64: 文件的Base64编码内容
-        file_format: 文件格式（如docx, pdf, jpg等），如果不提供则自动检测
-    
-    Returns:
-        dict: 包含上传结果和下载链接的字典
-    """
-    try:
-        logger.info("Starting file upload to server")
-        temp_files = []
-        
-        # 处理输入文件
-        if input_file:
-            if input_file.startswith("http://") or input_file.startswith("https://"):
-                try:
-                    # 自动检测文件格式
-                    if file_format:
-                        suffix = f".{file_format.lower()}"
-                    else:
-                        # 从URL中提取文件扩展名
-                        url_path = input_file.split("?")[0]  # 移除查询参数
-                        suffix = os.path.splitext(url_path)[1]
-                        if not suffix:
-                            suffix = ".file"  # 默认后缀
-                    
-                    input_file = download_url_to_tempfile(input_file, suffix)
-                    temp_files.append(input_file)
-                    logger.info(f"已下载文件到临时文件: {input_file}")
-                except Exception as e:
-                    logger.error(f"下载文件失败: {str(e)}")
-                    return {"success": False, "error": f"Error downloading file from URL: {str(e)}"}
-            
-            # 验证文件存在
-            try:
-                actual_file_path = validate_file_exists(input_file)
-                logger.info(f"找到文件: {actual_file_path}")
-            except Exception as e:
-                logger.error(f"文件验证失败: {str(e)}")
-                return {"success": False, "error": f"File validation failed: {str(e)}"}
-        
-        elif file_content_base64:
-            # 从Base64内容创建临时文件
-            if not file_format:
-                return {"success": False, "error": "file_format is required when using file_content_base64"}
-            
-            temp_dir = tempfile.mkdtemp()
-            temp_file = os.path.join(temp_dir, f"file_{int(time.time())}.{file_format.lower()}")
-            try:
-                file_content = base64.b64decode(file_content_base64)
-                with open(temp_file, "wb") as f:
-                    f.write(file_content)
-                actual_file_path = temp_file
-                temp_files.append(temp_file)
-                logger.info(f"已从Base64创建临时文件: {temp_file}")
-            except Exception as e:
-                logger.error(f"Base64解码失败: {str(e)}")
-                return {"success": False, "error": f"Error decoding Base64 content: {str(e)}"}
-        else:
-            return {"success": False, "error": "You must provide either input_file or file_content_base64"}
-        
-        # 验证文件
-        if not os.path.exists(actual_file_path):
-            return {"success": False, "error": f"File not found: {actual_file_path}"}
-        
-        file_size = os.path.getsize(actual_file_path)
-        if file_size == 0:
-            return {"success": False, "error": "File is empty"}
-        
-        # 获取文件格式
-        if not file_format:
-            file_format = os.path.splitext(actual_file_path)[1].lstrip('.')
-            if not file_format:
-                file_format = "file"
-        
-        logger.info(f"文件大小: {file_size} 字节, 格式: {file_format}")
-        
-        # 上传到服务器
-        try:
-            from sftp_upload_helper import upload_to_static_server
-            
-            # 生成远程文件名
-            filename = os.path.basename(actual_file_path)
-            if not filename.lower().endswith(f'.{file_format.lower()}'):
-                filename = f"{filename}.{file_format.lower()}"
-            
-            remote_file = f"/root/files/{filename}"
-            hostname = "8.156.74.79"
-            username = "root"
-            password = "zfsZBC123."
-            
-            logger.info(f"开始上传文件到服务器: {remote_file}")
-            upload_success = upload_to_static_server(actual_file_path, remote_file, hostname, username, password)
-            
-            if not upload_success:
-                logger.error(f"文件上传到服务器失败: {remote_file}")
-                return {"success": False, "error": f"Failed to upload file to server: {remote_file}"}
-            
-            # 生成下载链接
-            download_url = get_download_url(filename)
-            logger.info(f"文件上传成功，下载链接: {download_url}")
-            
-            return {
-                "success": True,
-                "message": f"{file_format.upper()} file uploaded successfully",
-                "filename": filename,
-                "file_size": file_size,
-                "file_format": file_format,
-                "download_url": download_url,
-                "upload_result": "success"
-            }
-            
-        except Exception as e:
-            logger.error(f"文件上传异常: {str(e)}")
-            return {"success": False, "error": f"Error uploading file: {str(e)}"}
-        
-        finally:
-            # 清理临时文件
-            for temp_file in temp_files:
-                try:
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                        logger.info(f"已清理临时文件: {temp_file}")
-                except Exception as e:
-                    logger.warning(f"清理临时文件失败: {temp_file}, 错误: {str(e)}")
-    
-    except Exception as e:
-        logger.error(f"Unexpected error in upload_file_to_server: {str(e)}")
         return {"success": False, "error": f"Unexpected error: {str(e)}"}
 
 if __name__ == "__main__":
