@@ -342,7 +342,14 @@ def fix_json_format(text):
     if text.startswith('{'):
         try:
             import json
-            parsed = json.loads(text)
+            # 预处理JSON字符串，处理换行符和特殊字符
+            processed_text = text
+            # 将JSON字符串中的换行符转义
+            processed_text = processed_text.replace('\n', '\\n')
+            processed_text = processed_text.replace('\r', '\\r')
+            processed_text = processed_text.replace('\t', '\\t')
+            
+            parsed = json.loads(processed_text)
             if isinstance(parsed, dict):
                 # 提取常见字段
                 for field in ['markdown_text', 'text', 'content', 'message', 'html_content', 'input_file']:
@@ -351,26 +358,63 @@ def fix_json_format(text):
                 # 如果只有一个键值对，返回值
                 if len(parsed) == 1:
                     return list(parsed.values())[0]
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON解析失败，尝试其他方法: {str(e)}")
             # JSON解析失败，尝试提取内容
             pass
     
     # 尝试提取被转义的内容
     import re
-    # 查找被转义的内容
+    # 查找被转义的内容，支持多行内容
     patterns = [
-        r'"markdown_text":\s*"([^"]*)"',
-        r'"text":\s*"([^"]*)"',
-        r'"content":\s*"([^"]*)"',
-        r'"message":\s*"([^"]*)"',
-        r'"html_content":\s*"([^"]*)"',
-        r'"input_file":\s*"([^"]*)"',
+        r'"markdown_text":\s*"([^"]*(?:\\n[^"]*)*)"',
+        r'"text":\s*"([^"]*(?:\\n[^"]*)*)"',
+        r'"content":\s*"([^"]*(?:\\n[^"]*)*)"',
+        r'"message":\s*"([^"]*(?:\\n[^"]*)*)"',
+        r'"html_content":\s*"([^"]*(?:\\n[^"]*)*)"',
+        r'"input_file":\s*"([^"]*(?:\\n[^"]*)*)"',
     ]
     
     for pattern in patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, text, re.DOTALL)
         if match:
-            return match.group(1)
+            content = match.group(1)
+            # 处理转义字符
+            content = content.replace('\\n', '\n')
+            content = content.replace('\\r', '\r')
+            content = content.replace('\\t', '\t')
+            content = content.replace('\\"', '"')
+            return content
+    
+    # 尝试更宽松的匹配模式
+    try:
+        # 查找JSON对象中的字符串值
+        import re
+        # 匹配 "field": "value" 格式，支持多行
+        json_pattern = r'"([^"]+)":\s*"([^"]*(?:\\n[^"]*)*)"'
+        matches = re.findall(json_pattern, text, re.DOTALL)
+        
+        if matches:
+            # 找到第一个有意义的字段
+            for field_name, field_value in matches:
+                if field_name in ['markdown_text', 'text', 'content', 'message']:
+                    # 处理转义字符
+                    field_value = field_value.replace('\\n', '\n')
+                    field_value = field_value.replace('\\r', '\r')
+                    field_value = field_value.replace('\\t', '\t')
+                    field_value = field_value.replace('\\"', '"')
+                    return field_value
+            
+            # 如果没有找到特定字段，返回第一个字段的值
+            if matches:
+                field_value = matches[0][1]
+                field_value = field_value.replace('\\n', '\n')
+                field_value = field_value.replace('\\r', '\r')
+                field_value = field_value.replace('\\t', '\t')
+                field_value = field_value.replace('\\"', '"')
+                return field_value
+    except Exception as e:
+        logger.warning(f"正则表达式匹配失败: {str(e)}")
     
     # 如果都失败了，返回原文本
     return text
@@ -1021,18 +1065,23 @@ def markdown2docx(markdown_text: str) -> dict:
     import tempfile, os, time, shutil, subprocess
     try:
         logger.info("Starting Markdown to DOCX conversion")
+        logger.info(f"原始输入类型: {type(markdown_text)}")
+        logger.info(f"原始输入长度: {len(markdown_text)}")
+        logger.info(f"原始输入预览: {repr(markdown_text[:200])}")
         
         # 使用通用JSON格式修正函数
         corrected_text = fix_json_format(markdown_text)
-        logger.info(f"原始输入长度: {len(markdown_text)}")
         logger.info(f"修正后长度: {len(corrected_text)}")
-        logger.info(f"修正前预览: {markdown_text[:100]}...")
-        logger.info(f"修正后预览: {corrected_text[:100]}...")
+        logger.info(f"修正后预览: {repr(corrected_text[:200])}")
         
         # 验证修正后的内容
         if not corrected_text or len(corrected_text.strip()) == 0:
             logger.error("修正后的内容为空")
             return {"success": False, "error": "修正后的markdown内容为空，请检查输入格式"}
+        
+        # 检查内容是否包含有效的markdown
+        if not any(char in corrected_text for char in ['#', '*', '-', '`', '[']):
+            logger.warning("修正后的内容可能不是有效的markdown格式")
         
         temp_dir = tempfile.mkdtemp()
         temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
@@ -1041,6 +1090,7 @@ def markdown2docx(markdown_text: str) -> dict:
         # 写入markdown内容
         with open(temp_md_file, "w", encoding="utf-8") as f:
             f.write(corrected_text)
+        logger.info(f"已写入临时markdown文件: {temp_md_file}")
         
         # 用pandoc生成docx
         try:
@@ -1051,13 +1101,15 @@ def markdown2docx(markdown_text: str) -> dict:
             return {"success": False, "error": "Pandoc 未安装或不可用，请先在服务器安装 pandoc。"}
         
         try:
+            logger.info(f"开始Pandoc转换: {temp_md_file} -> {temp_docx_file}")
             result = subprocess.run([
                 "pandoc", temp_md_file, "-o", temp_docx_file
             ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0:
-                logger.error(f"Pandoc 转换失败: {result.stderr.decode('utf-8')}")
+                error_msg = result.stderr.decode('utf-8')
+                logger.error(f"Pandoc 转换失败: {error_msg}")
                 shutil.rmtree(temp_dir)
-                return {"success": False, "error": f"Pandoc 转换失败: {result.stderr.decode('utf-8')}"}
+                return {"success": False, "error": f"Pandoc 转换失败: {error_msg}"}
             logger.info(f"Pandoc 转换完成，检查临时输出文件是否存在: {temp_docx_file}, 存在: {os.path.exists(temp_docx_file)}")
             if not os.path.exists(temp_docx_file):
                 logger.error(f"转换失败，未生成临时输出文件: {temp_docx_file}")
@@ -1088,6 +1140,7 @@ def markdown2docx(markdown_text: str) -> dict:
                 hostname = "8.156.74.79"
                 username = "root"
                 password = "zfsZBC123."
+                logger.info(f"开始上传到静态服务器: {remote_file}")
                 upload_success = upload_to_static_server(output_file, remote_file, hostname, username, password)
                 if not upload_success:
                     logger.error(f"自动上传到静态服务器失败: {remote_file}")
@@ -1102,7 +1155,9 @@ def markdown2docx(markdown_text: str) -> dict:
             return {"success": False, "error": f"Error moving output file: {str(e)}"}
         
         shutil.rmtree(temp_dir)
-        return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
+        download_url = get_download_url(os.path.basename(output_file))
+        logger.info(f"转换完成，下载链接: {download_url}")
+        return {"success": True, "output_file": output_file, "download_url": download_url}
     except Exception as e:
         logger.error(f"Unexpected error in markdown2docx: {str(e)}")
         return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"} 
