@@ -460,6 +460,32 @@ def fix_json_format(text):
     except Exception as e:
         logger.warning(f"直接提取内容失败: {str(e)}")
     
+    # 终极尝试：暴力提取
+    try:
+        # 如果所有方法都失败了，尝试最宽松的提取
+        if '"markdown_text"' in text:
+            # 找到markdown_text字段的开始
+            start_marker = '"markdown_text": "'
+            start_pos = text.find(start_marker)
+            if start_pos != -1:
+                start_content = start_pos + len(start_marker)
+                # 查找结束位置，从开始位置向后查找
+                remaining_text = text[start_content:]
+                # 尝试找到结束的引号
+                end_pos = remaining_text.find('"}')
+                if end_pos == -1:
+                    end_pos = remaining_text.rfind('"')
+                if end_pos > 0:
+                    content = remaining_text[:end_pos]
+                    # 处理转义字符
+                    content = content.replace('\\n', '\n')
+                    content = content.replace('\\r', '\r')
+                    content = content.replace('\\t', '\t')
+                    content = content.replace('\\"', '"')
+                    return content
+    except Exception as e:
+        logger.warning(f"暴力提取失败: {str(e)}")
+    
     # 如果都失败了，返回原文本
     return text
 
@@ -1147,6 +1173,34 @@ def markdown2docx(markdown_text: str) -> dict:
                         corrected_text = corrected_text.replace('\\t', '\t')
                         corrected_text = corrected_text.replace('\\"', '"')
                         logger.info("通过字符串提取成功获取内容")
+        
+        # 终极容错处理：如果还是JSON格式，尝试暴力提取
+        if corrected_text.startswith('{') and '"markdown_text"' in corrected_text:
+            logger.info("尝试终极容错处理")
+            try:
+                # 暴力提取：找到markdown_text字段的内容
+                start_marker = '"markdown_text": "'
+                start_pos = corrected_text.find(start_marker)
+                if start_pos != -1:
+                    start_content = start_pos + len(start_marker)
+                    # 从开始位置向后查找结束位置
+                    remaining_text = corrected_text[start_content:]
+                    # 尝试多种结束模式
+                    end_patterns = ['"}', '",', '"}', '"']
+                    for pattern in end_patterns:
+                        end_pos = remaining_text.find(pattern)
+                        if end_pos > 0:
+                            content = remaining_text[:end_pos]
+                            # 处理转义字符
+                            content = content.replace('\\n', '\n')
+                            content = content.replace('\\r', '\r')
+                            content = content.replace('\\t', '\t')
+                            content = content.replace('\\"', '"')
+                            corrected_text = content
+                            logger.info("通过终极容错处理成功获取内容")
+                            break
+            except Exception as e:
+                logger.warning(f"终极容错处理失败: {str(e)}")
         
         # 验证修正后的内容
         if not corrected_text or len(corrected_text.strip()) == 0:
