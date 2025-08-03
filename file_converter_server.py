@@ -25,7 +25,7 @@ import time
 import traceback
 import requests
 from typing import Optional
-from weasyprint import HTML
+# weasyprint将在需要时动态导入
 
 # Set up logging
 logging.basicConfig(
@@ -314,6 +314,66 @@ def get_download_url(filename):
     host = "8.156.74.79"
     port = 8001
     return f"http://{host}:{port}/{filename}"
+
+# 通用JSON格式修正函数
+def fix_json_format(text):
+    """修正各种可能的JSON格式错误，适用于所有工具"""
+    if not text:
+        return ""
+    
+    # 移除可能的非JSON前缀
+    text = text.strip()
+    
+    # 如果已经是纯文本（不是JSON），直接返回
+    if not text.startswith('{') and not text.startswith('"'):
+        return text
+    
+    # 处理被转义的JSON字符串
+    if text.startswith('"') and text.endswith('"'):
+        try:
+            # 尝试解析为JSON字符串
+            import json
+            return json.loads(text)
+        except:
+            # 如果不是有效的JSON字符串，移除引号
+            return text[1:-1] if len(text) > 2 else text
+    
+    # 处理JSON对象中的各种字段
+    if text.startswith('{'):
+        try:
+            import json
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                # 提取常见字段
+                for field in ['markdown_text', 'text', 'content', 'message', 'html_content', 'input_file']:
+                    if field in parsed:
+                        return parsed[field]
+                # 如果只有一个键值对，返回值
+                if len(parsed) == 1:
+                    return list(parsed.values())[0]
+        except json.JSONDecodeError:
+            # JSON解析失败，尝试提取内容
+            pass
+    
+    # 尝试提取被转义的内容
+    import re
+    # 查找被转义的内容
+    patterns = [
+        r'"markdown_text":\s*"([^"]*)"',
+        r'"text":\s*"([^"]*)"',
+        r'"content":\s*"([^"]*)"',
+        r'"message":\s*"([^"]*)"',
+        r'"html_content":\s*"([^"]*)"',
+        r'"input_file":\s*"([^"]*)"',
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    
+    # 如果都失败了，返回原文本
+    return text
 
 # DOCX to PDF conversion tool
 @mcp.tool("docx2pdf")
@@ -634,6 +694,15 @@ def convert_excel_to_csv(input_file: str) -> dict:
 def convert_html_to_pdf(input_file: Optional[str] = None, html_content: Optional[str] = None) -> dict:
     try:
         import tempfile, os, time, shutil
+        from weasyprint import HTML
+        
+        # 修正输入的html_content
+        if html_content:
+            corrected_html = fix_json_format(html_content)
+            logger.info(f"原始HTML内容长度: {len(html_content)}")
+            logger.info(f"修正后HTML内容长度: {len(corrected_html)}")
+            html_content = corrected_html
+        
         temp_dir = tempfile.mkdtemp()
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.pdf"
         if html_content is not None:
@@ -662,6 +731,14 @@ def convert_html_to_docx(input_file: Optional[str] = None, html_content: Optiona
     import tempfile, os, time
     try:
         logger.info(f"Starting HTML to DOCX conversion")
+        
+        # 修正输入的html_content
+        if html_content:
+            corrected_html = fix_json_format(html_content)
+            logger.info(f"原始HTML内容长度: {len(html_content)}")
+            logger.info(f"修正后HTML内容长度: {len(corrected_html)}")
+            html_content = corrected_html
+        
         temp_files = []
         temp_dir = tempfile.mkdtemp()
         temp_html_file = None
@@ -896,12 +973,27 @@ def markdown2pdf(markdown_text: str) -> dict:
     import tempfile, os, time, shutil
     try:
         logger.info("Starting Markdown to PDF conversion")
+        
+        # 使用通用JSON格式修正函数
+        corrected_text = fix_json_format(markdown_text)
+        logger.info(f"原始输入长度: {len(markdown_text)}")
+        logger.info(f"修正后长度: {len(corrected_text)}")
+        logger.info(f"修正前预览: {markdown_text[:100]}...")
+        logger.info(f"修正后预览: {corrected_text[:100]}...")
+        
+        # 验证修正后的内容
+        if not corrected_text or len(corrected_text.strip()) == 0:
+            logger.error("修正后的内容为空")
+            return {"success": False, "error": "修正后的markdown内容为空，请检查输入格式"}
+        
         temp_dir = tempfile.mkdtemp()
         temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
         temp_pdf_file = os.path.join(temp_dir, f"output_{int(time.time())}.pdf")
+        
         # 写入markdown内容
         with open(temp_md_file, "w", encoding="utf-8") as f:
-            f.write(markdown_text)
+            f.write(corrected_text)
+        
         # 用html2pdf工具链（已支持md转pdf）
         try:
             result = convert_html_to_pdf(temp_md_file)
@@ -916,6 +1008,7 @@ def markdown2pdf(markdown_text: str) -> dict:
             logger.error(f"Markdown转PDF异常: {str(e)}")
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"Error converting Markdown to PDF: {str(e)}"}
+        
         shutil.rmtree(temp_dir)
         return {"success": True, "output_file": output_file, "download_url": download_url}
     except Exception as e:
@@ -928,12 +1021,27 @@ def markdown2docx(markdown_text: str) -> dict:
     import tempfile, os, time, shutil, subprocess
     try:
         logger.info("Starting Markdown to DOCX conversion")
+        
+        # 使用通用JSON格式修正函数
+        corrected_text = fix_json_format(markdown_text)
+        logger.info(f"原始输入长度: {len(markdown_text)}")
+        logger.info(f"修正后长度: {len(corrected_text)}")
+        logger.info(f"修正前预览: {markdown_text[:100]}...")
+        logger.info(f"修正后预览: {corrected_text[:100]}...")
+        
+        # 验证修正后的内容
+        if not corrected_text or len(corrected_text.strip()) == 0:
+            logger.error("修正后的内容为空")
+            return {"success": False, "error": "修正后的markdown内容为空，请检查输入格式"}
+        
         temp_dir = tempfile.mkdtemp()
         temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
         temp_docx_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
+        
         # 写入markdown内容
         with open(temp_md_file, "w", encoding="utf-8") as f:
-            f.write(markdown_text)
+            f.write(corrected_text)
+        
         # 用pandoc生成docx
         try:
             subprocess.run(["pandoc", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -941,6 +1049,7 @@ def markdown2docx(markdown_text: str) -> dict:
             logger.error(f"Pandoc 未安装或不可用: {str(e)}")
             shutil.rmtree(temp_dir)
             return {"success": False, "error": "Pandoc 未安装或不可用，请先在服务器安装 pandoc。"}
+        
         try:
             result = subprocess.run([
                 "pandoc", temp_md_file, "-o", temp_docx_file
@@ -958,20 +1067,23 @@ def markdown2docx(markdown_text: str) -> dict:
             logger.error(f"Markdown转换异常: {str(e)}")
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
+        
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.docx"
         logger.info(f"准备保存输出文件到: {output_file}")
         output_dir = os.path.dirname(output_file)
         os.makedirs(output_dir, exist_ok=True)
+        
         if not os.path.exists(temp_docx_file):
             logger.error(f"临时输出文件未生成: {temp_docx_file}")
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"临时输出文件未生成: {temp_docx_file}"}
+        
         try:
             shutil.move(temp_docx_file, output_file)
             logger.info(f"已成功保存输出文件到: {output_file}")
             # 自动上传到静态服务器
             try:
-                from upload_to_server import upload_to_static_server
+                from sftp_upload_helper import upload_to_static_server
                 remote_file = f"/root/files/{os.path.basename(output_file)}"
                 hostname = "8.156.74.79"
                 username = "root"
@@ -988,11 +1100,9 @@ def markdown2docx(markdown_text: str) -> dict:
             logger.error(f"移动输出文件失败: {str(e)}")
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"Error moving output file: {str(e)}"}
+        
         shutil.rmtree(temp_dir)
         return {"success": True, "output_file": output_file, "download_url": get_download_url(os.path.basename(output_file))}
     except Exception as e:
         logger.error(f"Unexpected error in markdown2docx: {str(e)}")
-        return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
-
-if __name__ == "__main__":
-    mcp.run() 
+        return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"} 
