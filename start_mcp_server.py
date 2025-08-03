@@ -20,7 +20,7 @@ def setup_logging():
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.StreamHandler(sys.stdout)
+            logging.StreamHandler(sys.stderr)  # 将日志输出到stderr，避免干扰stdout的JSON输出
         ]
     )
     
