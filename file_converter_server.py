@@ -1083,7 +1083,7 @@ def markdown2docx(markdown_text: str) -> dict:
             logger.info(f"已成功保存输出文件到: {output_file}")
             # 自动上传到静态服务器
             try:
-                from sftp_upload_helper import upload_to_static_server
+                from upload_to_server import upload_to_static_server
                 remote_file = f"/root/files/{os.path.basename(output_file)}"
                 hostname = "8.156.74.79"
                 username = "root"
