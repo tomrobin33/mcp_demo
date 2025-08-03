@@ -338,6 +338,53 @@ def fix_json_format(text):
             # 如果不是有效的JSON字符串，移除引号
             return text[1:-1] if len(text) > 2 else text
     
+    # 处理嵌套JSON格式：{"arguments": "{\"markdown_text\": \"...\"}", "name": "..."}
+    if text.startswith('{') and '"arguments"' in text:
+        try:
+            import json
+            # 先解析外层JSON
+            outer_parsed = json.loads(text)
+            if isinstance(outer_parsed, dict) and 'arguments' in outer_parsed:
+                arguments_str = outer_parsed['arguments']
+                logger.info("检测到嵌套JSON格式，解析arguments字段")
+                
+                # 解析内层JSON字符串
+                try:
+                    inner_parsed = json.loads(arguments_str)
+                    if isinstance(inner_parsed, dict) and 'markdown_text' in inner_parsed:
+                        content = inner_parsed['markdown_text']
+                        # 处理转义字符
+                        content = content.replace('\\n', '\n')
+                        content = content.replace('\\r', '\r')
+                        content = content.replace('\\t', '\t')
+                        content = content.replace('\\"', '"')
+                        return content
+                except json.JSONDecodeError:
+                    logger.warning("内层JSON解析失败，尝试字符串提取")
+                    # 如果内层JSON解析失败，尝试从字符串中提取
+                    if '"markdown_text"' in arguments_str:
+                        start_marker = '"markdown_text": "'
+                        start_pos = arguments_str.find(start_marker)
+                        if start_pos != -1:
+                            start_content = start_pos + len(start_marker)
+                            remaining_text = arguments_str[start_content:]
+                            # 尝试多种结束模式
+                            end_patterns = ['"}', '",', '"}', '"']
+                            for pattern in end_patterns:
+                                end_pos = remaining_text.find(pattern)
+                                if end_pos > 0:
+                                    content = remaining_text[:end_pos]
+                                    # 处理转义字符
+                                    content = content.replace('\\n', '\n')
+                                    content = content.replace('\\r', '\r')
+                                    content = content.replace('\\t', '\t')
+                                    content = content.replace('\\"', '"')
+                                    return content
+        except json.JSONDecodeError as e:
+            logger.warning(f"外层JSON解析失败: {str(e)}")
+        except Exception as e:
+            logger.warning(f"嵌套JSON处理失败: {str(e)}")
+    
     # 处理JSON对象中的各种字段
     if text.startswith('{'):
         try:
@@ -485,6 +532,44 @@ def fix_json_format(text):
                     return content
     except Exception as e:
         logger.warning(f"暴力提取失败: {str(e)}")
+    
+    # 通用JSON格式处理：尝试修复常见的JSON格式问题
+    try:
+        # 处理包含换行符的JSON
+        if '"markdown_text"' in text:
+            # 找到markdown_text字段
+            start_marker = '"markdown_text": "'
+            start_pos = text.find(start_marker)
+            if start_pos != -1:
+                start_content = start_pos + len(start_marker)
+                # 从开始位置向后查找结束位置
+                remaining_text = text[start_content:]
+                
+                # 尝试多种结束模式
+                end_patterns = ['"}', '",', '"}', '"']
+                for pattern in end_patterns:
+                    end_pos = remaining_text.find(pattern)
+                    if end_pos > 0:
+                        content = remaining_text[:end_pos]
+                        # 处理转义字符
+                        content = content.replace('\\n', '\n')
+                        content = content.replace('\\r', '\r')
+                        content = content.replace('\\t', '\t')
+                        content = content.replace('\\"', '"')
+                        return content
+                
+                # 如果找不到明确的结束模式，尝试从后往前查找
+                end_pos = remaining_text.rfind('"')
+                if end_pos > 0:
+                    content = remaining_text[:end_pos]
+                    # 处理转义字符
+                    content = content.replace('\\n', '\n')
+                    content = content.replace('\\r', '\r')
+                    content = content.replace('\\t', '\t')
+                    content = content.replace('\\"', '"')
+                    return content
+    except Exception as e:
+        logger.warning(f"通用JSON格式处理失败: {str(e)}")
     
     # 如果都失败了，返回原文本
     return text
@@ -1083,22 +1168,50 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
 
 # Markdown to PDF
 @mcp.tool("markdown2pdf")
-def markdown2pdf(markdown_text: str) -> dict:
+def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> dict:
     import tempfile, os, time, shutil
     try:
         logger.info("Starting Markdown to PDF conversion")
+        logger.info(f"原始输入类型: {type(markdown_text)}")
+        logger.info(f"原始输入长度: {len(markdown_text) if markdown_text else 0}")
+        logger.info(f"原始输入预览: {repr(markdown_text[:200]) if markdown_text else 'None'}")
+        
+        # 处理多种输入格式
+        input_text = None
+        
+        # 1. 直接传入markdown_text
+        if markdown_text:
+            input_text = markdown_text
+        
+        # 2. 通过arguments字段传入
+        elif arguments:
+            input_text = arguments
+        
+        # 3. 从kwargs中查找任何可能的文本内容
+        else:
+            for key, value in kwargs.items():
+                if isinstance(value, str) and len(value) > 10:  # 假设有意义的文本至少10个字符
+                    input_text = value
+                    logger.info(f"从kwargs中找到文本内容，键名: {key}")
+                    break
+        
+        if not input_text:
+            logger.error("没有找到有效的输入内容")
+            return {"success": False, "error": "没有找到有效的输入内容"}
         
         # 使用通用JSON格式修正函数
-        corrected_text = fix_json_format(markdown_text)
-        logger.info(f"原始输入长度: {len(markdown_text)}")
+        corrected_text = fix_json_format(input_text)
         logger.info(f"修正后长度: {len(corrected_text)}")
-        logger.info(f"修正前预览: {markdown_text[:100]}...")
-        logger.info(f"修正后预览: {corrected_text[:100]}...")
+        logger.info(f"修正后预览: {repr(corrected_text[:200])}")
         
         # 验证修正后的内容
         if not corrected_text or len(corrected_text.strip()) == 0:
             logger.error("修正后的内容为空")
             return {"success": False, "error": "修正后的markdown内容为空，请检查输入格式"}
+        
+        # 检查内容是否包含有效的markdown
+        if not any(char in corrected_text for char in ['#', '*', '-', '`', '[']):
+            logger.warning("修正后的内容可能不是有效的markdown格式")
         
         temp_dir = tempfile.mkdtemp()
         temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
@@ -1107,6 +1220,7 @@ def markdown2pdf(markdown_text: str) -> dict:
         # 写入markdown内容
         with open(temp_md_file, "w", encoding="utf-8") as f:
             f.write(corrected_text)
+        logger.info(f"已写入临时markdown文件: {temp_md_file}")
         
         # 用html2pdf工具链（已支持md转pdf）
         try:
@@ -1131,16 +1245,39 @@ def markdown2pdf(markdown_text: str) -> dict:
 
 # Markdown to DOCX
 @mcp.tool("markdown2docx")
-def markdown2docx(markdown_text: str) -> dict:
+def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) -> dict:
     import tempfile, os, time, shutil, subprocess
     try:
         logger.info("Starting Markdown to DOCX conversion")
         logger.info(f"原始输入类型: {type(markdown_text)}")
-        logger.info(f"原始输入长度: {len(markdown_text)}")
-        logger.info(f"原始输入预览: {repr(markdown_text[:200])}")
+        logger.info(f"原始输入长度: {len(markdown_text) if markdown_text else 0}")
+        logger.info(f"原始输入预览: {repr(markdown_text[:200]) if markdown_text else 'None'}")
+        
+        # 处理多种输入格式
+        input_text = None
+        
+        # 1. 直接传入markdown_text
+        if markdown_text:
+            input_text = markdown_text
+        
+        # 2. 通过arguments字段传入
+        elif arguments:
+            input_text = arguments
+        
+        # 3. 从kwargs中查找任何可能的文本内容
+        else:
+            for key, value in kwargs.items():
+                if isinstance(value, str) and len(value) > 10:  # 假设有意义的文本至少10个字符
+                    input_text = value
+                    logger.info(f"从kwargs中找到文本内容，键名: {key}")
+                    break
+        
+        if not input_text:
+            logger.error("没有找到有效的输入内容")
+            return {"success": False, "error": "没有找到有效的输入内容"}
         
         # 使用通用JSON格式修正函数
-        corrected_text = fix_json_format(markdown_text)
+        corrected_text = fix_json_format(input_text)
         logger.info(f"修正后长度: {len(corrected_text)}")
         logger.info(f"修正后预览: {repr(corrected_text[:200])}")
         
@@ -1201,6 +1338,47 @@ def markdown2docx(markdown_text: str) -> dict:
                             break
             except Exception as e:
                 logger.warning(f"终极容错处理失败: {str(e)}")
+        
+        # 通用JSON格式处理：处理包含换行符的JSON
+        if corrected_text.startswith('{') and '"markdown_text"' in corrected_text:
+            logger.info("尝试通用JSON格式处理")
+            try:
+                # 处理包含换行符的JSON格式
+                start_marker = '"markdown_text": "'
+                start_pos = corrected_text.find(start_marker)
+                if start_pos != -1:
+                    start_content = start_pos + len(start_marker)
+                    remaining_text = corrected_text[start_content:]
+                    
+                    # 尝试多种结束模式
+                    end_patterns = ['"}', '",', '"}', '"']
+                    for pattern in end_patterns:
+                        end_pos = remaining_text.find(pattern)
+                        if end_pos > 0:
+                            content = remaining_text[:end_pos]
+                            # 处理转义字符
+                            content = content.replace('\\n', '\n')
+                            content = content.replace('\\r', '\r')
+                            content = content.replace('\\t', '\t')
+                            content = content.replace('\\"', '"')
+                            corrected_text = content
+                            logger.info("通过通用JSON格式处理成功获取内容")
+                            break
+                    
+                    # 如果找不到明确的结束模式，尝试从后往前查找
+                    if corrected_text.startswith('{'):
+                        end_pos = remaining_text.rfind('"')
+                        if end_pos > 0:
+                            content = remaining_text[:end_pos]
+                            # 处理转义字符
+                            content = content.replace('\\n', '\n')
+                            content = content.replace('\\r', '\r')
+                            content = content.replace('\\t', '\t')
+                            content = content.replace('\\"', '"')
+                            corrected_text = content
+                            logger.info("通过后向查找成功获取内容")
+            except Exception as e:
+                logger.warning(f"通用JSON格式处理失败: {str(e)}")
         
         # 验证修正后的内容
         if not corrected_text or len(corrected_text.strip()) == 0:
