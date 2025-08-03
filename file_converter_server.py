@@ -1169,6 +1169,38 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
 # Markdown to PDF
 @mcp.tool("markdown2pdf")
 def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> dict:
+    """
+    将Markdown文本转换为PDF文档格式。
+    
+    支持多种调用方式：
+    1. 直接传入markdown_text参数（推荐）
+    2. 通过arguments参数传入
+    3. 通过kwargs传入任意参数名
+    
+    参数说明：
+    - markdown_text: 要转换的Markdown文本内容
+    - arguments: 备用参数，可以传入Markdown文本
+    - **kwargs: 支持任意参数名传入Markdown文本
+    
+    调用示例：
+    1. 推荐方式：{"markdown_text": "# 标题\\n这是内容"}
+    2. 备用方式：{"arguments": "# 标题\\n这是内容"}
+    3. 灵活方式：{"content": "# 标题\\n这是内容"} 或 {"text": "# 标题\\n这是内容"}
+    
+    返回格式：
+    {
+        "success": true/false,
+        "output_file": "输出文件路径",
+        "download_url": "下载链接",
+        "error": "错误信息（如果失败）"
+    }
+    
+    注意：
+    - 支持各种Markdown语法：标题、列表、链接、代码块等
+    - 自动处理JSON格式的输入
+    - 使用html2pdf工具链进行转换
+    - 支持中文内容
+    """
     import tempfile, os, time, shutil
     try:
         logger.info("Starting Markdown to PDF conversion")
@@ -1176,30 +1208,32 @@ def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> 
         logger.info(f"原始输入长度: {len(markdown_text) if markdown_text else 0}")
         logger.info(f"原始输入预览: {repr(markdown_text[:200]) if markdown_text else 'None'}")
         
-        # 处理多种输入格式
+        # 处理多种输入格式 - kwargs优先级最高
         input_text = None
         
-        # 1. 直接传入markdown_text
-        if markdown_text:
+        # 1. 从kwargs中查找任何可能的文本内容（第一优先级）
+        # 这样可以兼容大模型以任意参数名传入内容的情况
+        for key, value in kwargs.items():
+            if isinstance(value, str) and len(value) > 10:  # 假设有意义的文本至少10个字符
+                input_text = value
+                logger.info(f"从kwargs中找到文本内容，键名: {key}")
+                break
+        
+        # 2. 直接传入markdown_text（推荐方式）
+        if not input_text and markdown_text:
             input_text = markdown_text
+            logger.info("使用markdown_text参数")
         
-        # 2. 通过arguments字段传入
-        elif arguments:
+        # 3. 通过arguments字段传入（备用方式）
+        elif not input_text and arguments:
             input_text = arguments
-        
-        # 3. 从kwargs中查找任何可能的文本内容
-        else:
-            for key, value in kwargs.items():
-                if isinstance(value, str) and len(value) > 10:  # 假设有意义的文本至少10个字符
-                    input_text = value
-                    logger.info(f"从kwargs中找到文本内容，键名: {key}")
-                    break
+            logger.info("使用arguments参数")
         
         if not input_text:
             logger.error("没有找到有效的输入内容")
-            return {"success": False, "error": "没有找到有效的输入内容"}
+            return {"success": False, "error": "没有找到有效的输入内容，请提供markdown_text、arguments或通过kwargs传入文本内容"}
         
-        # 使用通用JSON格式修正函数
+        # 使用通用JSON格式修正函数处理各种格式的输入
         corrected_text = fix_json_format(input_text)
         logger.info(f"修正后长度: {len(corrected_text)}")
         logger.info(f"修正后预览: {repr(corrected_text[:200])}")
@@ -1209,20 +1243,21 @@ def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> 
             logger.error("修正后的内容为空")
             return {"success": False, "error": "修正后的markdown内容为空，请检查输入格式"}
         
-        # 检查内容是否包含有效的markdown
+        # 检查内容是否包含有效的markdown语法
         if not any(char in corrected_text for char in ['#', '*', '-', '`', '[']):
-            logger.warning("修正后的内容可能不是有效的markdown格式")
+            logger.warning("修正后的内容可能不是有效的markdown格式，但会继续处理")
         
+        # 创建临时目录和文件
         temp_dir = tempfile.mkdtemp()
         temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
         temp_pdf_file = os.path.join(temp_dir, f"output_{int(time.time())}.pdf")
         
-        # 写入markdown内容
+        # 写入markdown内容到临时文件
         with open(temp_md_file, "w", encoding="utf-8") as f:
             f.write(corrected_text)
         logger.info(f"已写入临时markdown文件: {temp_md_file}")
         
-        # 用html2pdf工具链（已支持md转pdf）
+        # 使用html2pdf工具链进行转换（已支持md转pdf）
         try:
             result = convert_html_to_pdf(temp_md_file)
             if not result.get("success"):
@@ -1237,6 +1272,7 @@ def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> 
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"Error converting Markdown to PDF: {str(e)}"}
         
+        # 清理临时文件并返回结果
         shutil.rmtree(temp_dir)
         return {"success": True, "output_file": output_file, "download_url": download_url}
     except Exception as e:
@@ -1246,6 +1282,38 @@ def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> 
 # Markdown to DOCX
 @mcp.tool("markdown2docx")
 def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) -> dict:
+    """
+    将Markdown文本转换为DOCX文档格式。
+    
+    支持多种调用方式：
+    1. 直接传入markdown_text参数（推荐）
+    2. 通过arguments参数传入
+    3. 通过kwargs传入任意参数名
+    
+    参数说明：
+    - markdown_text: 要转换的Markdown文本内容
+    - arguments: 备用参数，可以传入Markdown文本
+    - **kwargs: 支持任意参数名传入Markdown文本
+    
+    调用示例：
+    1. 推荐方式：{"markdown_text": "# 标题\\n这是内容"}
+    2. 备用方式：{"arguments": "# 标题\\n这是内容"}
+    3. 灵活方式：{"content": "# 标题\\n这是内容"} 或 {"text": "# 标题\\n这是内容"}
+    
+    返回格式：
+    {
+        "success": true/false,
+        "output_file": "输出文件路径",
+        "download_url": "下载链接",
+        "error": "错误信息（如果失败）"
+    }
+    
+    注意：
+    - 支持各种Markdown语法：标题、列表、链接、代码块等
+    - 自动处理JSON格式的输入
+    - 自动上传到静态服务器
+    - 支持中文内容
+    """
     import tempfile, os, time, shutil, subprocess
     try:
         logger.info("Starting Markdown to DOCX conversion")
@@ -1253,47 +1321,50 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
         logger.info(f"原始输入长度: {len(markdown_text) if markdown_text else 0}")
         logger.info(f"原始输入预览: {repr(markdown_text[:200]) if markdown_text else 'None'}")
         
-        # 处理多种输入格式
+        # 处理多种输入格式 - kwargs优先级最高
         input_text = None
         
-        # 1. 直接传入markdown_text
-        if markdown_text:
+        # 1. 从kwargs中查找任何可能的文本内容（第一优先级）
+        # 这样可以兼容大模型以任意参数名传入内容的情况
+        for key, value in kwargs.items():
+            if isinstance(value, str) and len(value) > 10:  # 假设有意义的文本至少10个字符
+                input_text = value
+                logger.info(f"从kwargs中找到文本内容，键名: {key}")
+                break
+        
+        # 2. 直接传入markdown_text（推荐方式）
+        if not input_text and markdown_text:
             input_text = markdown_text
+            logger.info("使用markdown_text参数")
         
-        # 2. 通过arguments字段传入
-        elif arguments:
+        # 3. 通过arguments字段传入（备用方式）
+        elif not input_text and arguments:
             input_text = arguments
-        
-        # 3. 从kwargs中查找任何可能的文本内容
-        else:
-            for key, value in kwargs.items():
-                if isinstance(value, str) and len(value) > 10:  # 假设有意义的文本至少10个字符
-                    input_text = value
-                    logger.info(f"从kwargs中找到文本内容，键名: {key}")
-                    break
+            logger.info("使用arguments参数")
         
         if not input_text:
             logger.error("没有找到有效的输入内容")
-            return {"success": False, "error": "没有找到有效的输入内容"}
+            return {"success": False, "error": "没有找到有效的输入内容，请提供markdown_text、arguments或通过kwargs传入文本内容"}
         
-        # 使用通用JSON格式修正函数
+        # 使用通用JSON格式修正函数处理各种格式的输入
         corrected_text = fix_json_format(input_text)
         logger.info(f"修正后长度: {len(corrected_text)}")
         logger.info(f"修正后预览: {repr(corrected_text[:200])}")
         
         # 特殊处理：如果修正后的内容仍然包含JSON结构，尝试进一步处理
+        # 这种情况通常发生在输入是嵌套JSON格式时
         if corrected_text.startswith('{') and '"markdown_text"' in corrected_text:
             logger.info("检测到JSON结构，尝试进一步处理")
             try:
                 import json
-                # 尝试直接解析
+                # 尝试直接解析JSON
                 parsed = json.loads(corrected_text)
                 if isinstance(parsed, dict) and 'markdown_text' in parsed:
                     corrected_text = parsed['markdown_text']
                     logger.info("成功从JSON中提取markdown_text字段")
             except json.JSONDecodeError:
                 logger.warning("JSON解析失败，尝试字符串提取")
-                # 尝试字符串提取
+                # 尝试字符串提取方式
                 start_marker = '"markdown_text": "'
                 start_pos = corrected_text.find(start_marker)
                 if start_pos != -1:
@@ -1312,6 +1383,7 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
                         logger.info("通过字符串提取成功获取内容")
         
         # 终极容错处理：如果还是JSON格式，尝试暴力提取
+        # 这是最后的兜底方案，确保能处理各种复杂格式
         if corrected_text.startswith('{') and '"markdown_text"' in corrected_text:
             logger.info("尝试终极容错处理")
             try:
@@ -1340,6 +1412,7 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
                 logger.warning(f"终极容错处理失败: {str(e)}")
         
         # 通用JSON格式处理：处理包含换行符的JSON
+        # 这种情况通常发生在输入包含多行文本时
         if corrected_text.startswith('{') and '"markdown_text"' in corrected_text:
             logger.info("尝试通用JSON格式处理")
             try:
@@ -1385,20 +1458,21 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
             logger.error("修正后的内容为空")
             return {"success": False, "error": "修正后的markdown内容为空，请检查输入格式"}
         
-        # 检查内容是否包含有效的markdown
+        # 检查内容是否包含有效的markdown语法
         if not any(char in corrected_text for char in ['#', '*', '-', '`', '[']):
-            logger.warning("修正后的内容可能不是有效的markdown格式")
+            logger.warning("修正后的内容可能不是有效的markdown格式，但会继续处理")
         
+        # 创建临时目录和文件
         temp_dir = tempfile.mkdtemp()
         temp_md_file = os.path.join(temp_dir, f"input_{int(time.time())}.md")
         temp_docx_file = os.path.join(temp_dir, f"output_{int(time.time())}.docx")
         
-        # 写入markdown内容
+        # 写入markdown内容到临时文件
         with open(temp_md_file, "w", encoding="utf-8") as f:
             f.write(corrected_text)
         logger.info(f"已写入临时markdown文件: {temp_md_file}")
         
-        # 用pandoc生成docx
+        # 检查pandoc是否可用
         try:
             subprocess.run(["pandoc", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except Exception as e:
@@ -1406,6 +1480,7 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
             shutil.rmtree(temp_dir)
             return {"success": False, "error": "Pandoc 未安装或不可用，请先在服务器安装 pandoc。"}
         
+        # 使用pandoc进行转换
         try:
             logger.info(f"开始Pandoc转换: {temp_md_file} -> {temp_docx_file}")
             result = subprocess.run([
@@ -1426,6 +1501,7 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"Error converting Markdown to DOCX: {str(e)}"}
         
+        # 保存输出文件到指定目录
         output_file = f"{OUTPUT_DIR}/output_{int(time.time())}.docx"
         logger.info(f"准备保存输出文件到: {output_file}")
         output_dir = os.path.dirname(output_file)
@@ -1436,6 +1512,7 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"临时输出文件未生成: {temp_docx_file}"}
         
+        # 移动文件并自动上传到静态服务器
         try:
             shutil.move(temp_docx_file, output_file)
             logger.info(f"已成功保存输出文件到: {output_file}")
@@ -1460,6 +1537,7 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
             shutil.rmtree(temp_dir)
             return {"success": False, "error": f"Error moving output file: {str(e)}"}
         
+        # 清理临时文件并返回结果
         shutil.rmtree(temp_dir)
         download_url = get_download_url(os.path.basename(output_file))
         logger.info(f"转换完成，下载链接: {download_url}")
