@@ -1168,7 +1168,7 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
 
 # Markdown to PDF
 @mcp.tool("markdown2pdf")
-def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> dict:
+def markdown2pdf(markdown_text: str = None, arguments: str = None) -> dict:
     import tempfile, os, time, shutil
     try:
         logger.info("Starting Markdown to PDF conversion")
@@ -1186,14 +1186,6 @@ def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> 
         # 2. 通过arguments字段传入
         elif arguments:
             input_text = arguments
-        
-        # 3. 从kwargs中查找任何可能的文本内容
-        else:
-            for key, value in kwargs.items():
-                if isinstance(value, str) and len(value) > 10:  # 假设有意义的文本至少10个字符
-                    input_text = value
-                    logger.info(f"从kwargs中找到文本内容，键名: {key}")
-                    break
         
         if not input_text:
             logger.error("没有找到有效的输入内容")
@@ -1245,7 +1237,7 @@ def markdown2pdf(markdown_text: str = None, arguments: str = None, **kwargs) -> 
 
 # Markdown to DOCX
 @mcp.tool("markdown2docx")
-def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) -> dict:
+def markdown2docx(markdown_text: str = None, arguments: str = None) -> dict:
     import tempfile, os, time, shutil, subprocess
     try:
         logger.info("Starting Markdown to DOCX conversion")
@@ -1263,14 +1255,6 @@ def markdown2docx(markdown_text: str = None, arguments: str = None, **kwargs) ->
         # 2. 通过arguments字段传入
         elif arguments:
             input_text = arguments
-        
-        # 3. 从kwargs中查找任何可能的文本内容
-        else:
-            for key, value in kwargs.items():
-                if isinstance(value, str) and len(value) > 10:  # 假设有意义的文本至少10个字符
-                    input_text = value
-                    logger.info(f"从kwargs中找到文本内容，键名: {key}")
-                    break
         
         if not input_text:
             logger.error("没有找到有效的输入内容")
