@@ -344,20 +344,45 @@ def fix_json_format(text):
             import json
             # 预处理JSON字符串，处理换行符和特殊字符
             processed_text = text
-            # 将JSON字符串中的换行符转义
-            processed_text = processed_text.replace('\n', '\\n')
-            processed_text = processed_text.replace('\r', '\\r')
-            processed_text = processed_text.replace('\t', '\\t')
+            
+            # 更智能的JSON预处理
+            # 1. 处理字符串值中的换行符
+            import re
+            # 匹配字符串值中的换行符，但不在JSON结构中的
+            string_pattern = r'"([^"]*(?:\\n[^"]*)*)"'
+            
+            def replace_newlines_in_strings(match):
+                content = match.group(1)
+                # 将字符串中的换行符转义
+                content = content.replace('\n', '\\n')
+                content = content.replace('\r', '\\r')
+                content = content.replace('\t', '\\t')
+                return f'"{content}"'
+            
+            processed_text = re.sub(string_pattern, replace_newlines_in_strings, processed_text)
             
             parsed = json.loads(processed_text)
             if isinstance(parsed, dict):
                 # 提取常见字段
                 for field in ['markdown_text', 'text', 'content', 'message', 'html_content', 'input_file']:
                     if field in parsed:
-                        return parsed[field]
+                        value = parsed[field]
+                        # 处理转义字符
+                        if isinstance(value, str):
+                            value = value.replace('\\n', '\n')
+                            value = value.replace('\\r', '\r')
+                            value = value.replace('\\t', '\t')
+                            value = value.replace('\\"', '"')
+                        return value
                 # 如果只有一个键值对，返回值
                 if len(parsed) == 1:
-                    return list(parsed.values())[0]
+                    value = list(parsed.values())[0]
+                    if isinstance(value, str):
+                        value = value.replace('\\n', '\n')
+                        value = value.replace('\\r', '\r')
+                        value = value.replace('\\t', '\t')
+                        value = value.replace('\\"', '"')
+                    return value
         except json.JSONDecodeError as e:
             logger.warning(f"JSON解析失败，尝试其他方法: {str(e)}")
             # JSON解析失败，尝试提取内容
@@ -415,6 +440,25 @@ def fix_json_format(text):
                 return field_value
     except Exception as e:
         logger.warning(f"正则表达式匹配失败: {str(e)}")
+    
+    # 最后尝试：直接提取JSON对象中的内容
+    try:
+        # 查找第一个和最后一个引号之间的内容
+        start_quote = text.find('"markdown_text": "')
+        if start_quote != -1:
+            start_content = start_quote + len('"markdown_text": "')
+            # 从后往前查找最后一个引号
+            end_quote = text.rfind('"')
+            if end_quote > start_content:
+                content = text[start_content:end_quote]
+                # 处理转义字符
+                content = content.replace('\\n', '\n')
+                content = content.replace('\\r', '\r')
+                content = content.replace('\\t', '\t')
+                content = content.replace('\\"', '"')
+                return content
+    except Exception as e:
+        logger.warning(f"直接提取内容失败: {str(e)}")
     
     # 如果都失败了，返回原文本
     return text
@@ -1073,6 +1117,36 @@ def markdown2docx(markdown_text: str) -> dict:
         corrected_text = fix_json_format(markdown_text)
         logger.info(f"修正后长度: {len(corrected_text)}")
         logger.info(f"修正后预览: {repr(corrected_text[:200])}")
+        
+        # 特殊处理：如果修正后的内容仍然包含JSON结构，尝试进一步处理
+        if corrected_text.startswith('{') and '"markdown_text"' in corrected_text:
+            logger.info("检测到JSON结构，尝试进一步处理")
+            try:
+                import json
+                # 尝试直接解析
+                parsed = json.loads(corrected_text)
+                if isinstance(parsed, dict) and 'markdown_text' in parsed:
+                    corrected_text = parsed['markdown_text']
+                    logger.info("成功从JSON中提取markdown_text字段")
+            except json.JSONDecodeError:
+                logger.warning("JSON解析失败，尝试字符串提取")
+                # 尝试字符串提取
+                start_marker = '"markdown_text": "'
+                start_pos = corrected_text.find(start_marker)
+                if start_pos != -1:
+                    start_content = start_pos + len(start_marker)
+                    # 查找结束位置
+                    end_pos = corrected_text.find('"}', start_content)
+                    if end_pos == -1:
+                        end_pos = corrected_text.rfind('"')
+                    if end_pos > start_content:
+                        corrected_text = corrected_text[start_content:end_pos]
+                        # 处理转义字符
+                        corrected_text = corrected_text.replace('\\n', '\n')
+                        corrected_text = corrected_text.replace('\\r', '\r')
+                        corrected_text = corrected_text.replace('\\t', '\t')
+                        corrected_text = corrected_text.replace('\\"', '"')
+                        logger.info("通过字符串提取成功获取内容")
         
         # 验证修正后的内容
         if not corrected_text or len(corrected_text.strip()) == 0:
