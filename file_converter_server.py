@@ -577,6 +577,8 @@ def fix_json_format(text):
 # DOCX to PDF conversion tool
 @mcp.tool("docx2pdf")
 def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None) -> dict:
+    import sys
+    import platform
     try:
         logger.info(f"Starting DOCX to PDF conversion")
         temp_files = []
@@ -618,9 +620,27 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
                 logger.error(f"查找DOCX文件失败: {str(e)}")
                 return {"success": False, "error": f"Error finding DOCX file: {str(e)}"}
         try:
-            from docx2pdf import convert
-            logger.info(f"开始转换: {actual_file_path} -> {temp_output_file}")
-            convert(actual_file_path, temp_output_file)
+            if platform.system().lower() == "windows":
+                from docx2pdf import convert
+                logger.info(f"Windows平台，使用docx2pdf: {actual_file_path} -> {temp_output_file}")
+                convert(actual_file_path, temp_output_file)
+            else:
+                import subprocess
+                logger.info(f"非Windows平台，使用libreoffice: {actual_file_path} -> {temp_output_file}")
+                # libreoffice --headless --convert-to pdf input.docx --outdir /output/dir
+                cmd = [
+                    "libreoffice", "--headless", "--convert-to", "pdf", actual_file_path, "--outdir", temp_dir
+                ]
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                logger.info(f"libreoffice stdout: {result.stdout.decode('utf-8')}")
+                logger.info(f"libreoffice stderr: {result.stderr.decode('utf-8')}")
+                # 查找输出pdf
+                base_name = os.path.splitext(os.path.basename(actual_file_path))[0]
+                generated_pdf = os.path.join(temp_dir, base_name + ".pdf")
+                if not os.path.exists(generated_pdf):
+                    raise Exception(f"libreoffice未生成PDF: {generated_pdf}")
+                # 重命名为 temp_output_file 以兼容后续逻辑
+                os.rename(generated_pdf, temp_output_file)
         except Exception as e:
             import shutil
             shutil.rmtree(temp_dir)
@@ -764,6 +784,8 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
             for f in temp_files:
                 os.remove(f)
             return {"success": False, "error": f"Error moving output file: {str(e)}"}
+        if temp_html_file and os.path.exists(temp_html_file):
+            os.remove(temp_html_file)
         shutil.rmtree(temp_dir)
         for f in temp_files:
             os.remove(f)
