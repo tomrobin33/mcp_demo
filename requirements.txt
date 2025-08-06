@@ -1,6 +1,6 @@
 # requirements.txt
 # 注意：html2docx功能需要系统已安装pandoc（用apt/yum安装，非pip）
-mcp>=1.0.0>=1.0.0
+mcp>=1.0.0
 pdf2docx
 docx2pdf
 pillow
