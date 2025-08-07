@@ -317,38 +317,45 @@ def fix_json_format(text):
     # 特殊处理：修复不完整的JSON字符串
     # 这种情况通常发生在AI生成的JSON格式中途被截断
     if text.startswith('{') and '"markdown_text"' in text:
-        logger.info("检测到可能不完整的JSON格式，尝试修复")
-        # 检查是否有markdown_text字段但缺少结束符
-        if '"markdown_text":' in text and not text.rstrip().endswith('}'):
-            # 尝试找到markdown_text的值
-            start_marker = '"markdown_text": "'
-            start_pos = text.find(start_marker)
-            if start_pos != -1:
-                start_content = start_pos + len(start_marker)
-                content_part = text[start_content:]
-                
-                # 如果字符串没有正确结束，尝试修复
-                if not content_part.endswith('"}') and not content_part.endswith('",'):
-                    # 移除末尾可能的不完整字符并添加正确的结束符
-                    content_part = content_part.rstrip()
-                    # 如果内容以换行符结束，可能是被截断了
-                    if content_part.endswith('\n') or content_part.endswith('\n\n'):
-                        content_part = content_part.rstrip('\n')
+        # 首先尝试正常解析JSON，如果成功就不需要修复
+        try:
+            import json
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and 'markdown_text' in parsed:
+                logger.info("JSON解析成功，直接返回markdown_text内容")
+                return parsed['markdown_text']
+        except json.JSONDecodeError:
+            logger.info("JSON解析失败，尝试修复不完整的JSON格式")
+            # 检查是否有markdown_text字段但缺少结束符
+            if '"markdown_text":' in text and not text.rstrip().endswith('}'):
+                # 尝试找到markdown_text的值
+                start_marker = '"markdown_text": "'
+                start_pos = text.find(start_marker)
+                if start_pos != -1:
+                    start_content = start_pos + len(start_marker)
+                    content_part = text[start_content:]
                     
-                    # 构建完整的JSON
-                    fixed_json = '{"markdown_text": "' + content_part + '"}'
-                    logger.info(f"修复JSON格式，原长度: {len(text)}, 修复后长度: {len(fixed_json)}")
-                    try:
-                        import json
-                        # 验证修复后的JSON是否有效
-                        parsed = json.loads(fixed_json)
-                        if 'markdown_text' in parsed:
-                            logger.info("JSON修复成功，返回markdown_text内容")
-                            return parsed['markdown_text']
-                    except Exception as e:
-                        logger.warning(f"修复后的JSON仍然无效: {str(e)}")
-                        # 如果修复失败，直接返回提取的内容
-                        return content_part
+                    # 如果字符串没有正确结束，尝试修复
+                    if not content_part.endswith('"}') and not content_part.endswith('",'):
+                        # 移除末尾可能的不完整字符并添加正确的结束符
+                        content_part = content_part.rstrip()
+                        # 如果内容以换行符结束，可能是被截断了
+                        if content_part.endswith('\n') or content_part.endswith('\n\n'):
+                            content_part = content_part.rstrip('\n')
+                        
+                        # 构建完整的JSON
+                        fixed_json = '{"markdown_text": "' + content_part + '"}'
+                        logger.info(f"修复JSON格式，原长度: {len(text)}, 修复后长度: {len(fixed_json)}")
+                        try:
+                            # 验证修复后的JSON是否有效
+                            parsed = json.loads(fixed_json)
+                            if 'markdown_text' in parsed:
+                                logger.info("JSON修复成功，返回markdown_text内容")
+                                return parsed['markdown_text']
+                        except Exception as e:
+                            logger.warning(f"修复后的JSON仍然无效: {str(e)}")
+                            # 如果修复失败，直接返回提取的内容
+                            return content_part
     
     # 处理嵌套JSON格式：{"arguments": "{\"markdown_text\": \"...\"}", "name": "..."}
     if text.startswith('{') and '"arguments"' in text:
@@ -1212,24 +1219,21 @@ def convert_markdown_to_pdf_content(file_content_base64: str) -> dict:
 
 # Markdown to PDF
 @mcp.tool("markdown2pdf")
-def markdown2pdf(markdown_text: str, arguments: str = None, **kwargs) -> dict:
+def markdown2pdf(markdown_text: str, arguments: str = None) -> dict:
     """
     将Markdown文本转换为PDF文档格式。
     
     支持多种调用方式：
     1. 直接传入markdown_text参数（推荐）
     2. 通过arguments参数传入
-    3. 通过kwargs传入任意参数名
     
     参数说明：
     - markdown_text: 要转换的Markdown文本内容
     - arguments: 备用参数，可以传入Markdown文本
-    - **kwargs: 支持任意参数名传入Markdown文本
     
     调用示例：
     1. 推荐方式：{"markdown_text": "# 标题\\n这是内容"}
     2. 备用方式：{"arguments": "# 标题\\n这是内容"}
-    3. 灵活方式：{"content": "# 标题\\n这是内容"} 或 {"text": "# 标题\\n这是内容"}
     
     返回格式：
     {
@@ -1252,9 +1256,8 @@ def markdown2pdf(markdown_text: str, arguments: str = None, **kwargs) -> dict:
         logger.info(f"原始输入长度: {len(markdown_text) if markdown_text else 0}")
         logger.info(f"原始输入预览: {repr(markdown_text[:200]) if markdown_text else 'None'}")
         logger.info(f"Arguments: {arguments}")
-        logger.info(f"Kwargs: {kwargs}")
         
-        # 处理多种输入格式 - markdown_text第一优先级（必需参数）
+        # 处理输入格式 - markdown_text第一优先级（必需参数）
         input_text = None
         
         # 第一优先级：直接传入的markdown_text参数（必需参数）
@@ -1262,34 +1265,14 @@ def markdown2pdf(markdown_text: str, arguments: str = None, **kwargs) -> dict:
             input_text = markdown_text
             logger.info("使用markdown_text参数（第一优先级）")
         
-        # 第二优先级：通过arguments字段传入（向后兼容）
+        # 第二优先级：通过arguments字段传入（备用）
         elif arguments:
             input_text = arguments
             logger.info("使用arguments参数（第二优先级）")
         
-        # 第三优先级：处理嵌套的kwargs结构 {"kwargs": {"markdown_text": "内容"}}（向后兼容）
-        elif 'kwargs' in kwargs:
-            nested_kwargs = kwargs['kwargs']
-            if isinstance(nested_kwargs, dict):
-                logger.info("检测到嵌套的kwargs结构，第三优先级处理")
-                # 从嵌套的kwargs中查找文本内容
-                for key, value in nested_kwargs.items():
-                    if isinstance(value, str) and len(value) > 10:
-                        input_text = value
-                        logger.info(f"从嵌套kwargs中找到文本内容，键名: {key}，内容长度: {len(value)}")
-                        break
-        
-        # 第四优先级：从直接的kwargs中查找文本内容（向后兼容）
-        if not input_text:
-            for key, value in kwargs.items():
-                if key != 'kwargs' and isinstance(value, str) and len(value) > 10:
-                    input_text = value
-                    logger.info(f"从直接kwargs中找到文本内容，键名: {key}，内容长度: {len(value)}")
-                    break
-        
         if not input_text:
             logger.error("没有找到有效的输入内容")
-            return {"success": False, "error": "没有找到有效的输入内容，请提供markdown_text、arguments或通过kwargs传入文本内容"}
+            return {"success": False, "error": "没有找到有效的输入内容，请提供markdown_text或arguments参数"}
         
         # 使用通用JSON格式修正函数处理各种格式的输入
         corrected_text = fix_json_format(input_text)
@@ -1339,24 +1322,21 @@ def markdown2pdf(markdown_text: str, arguments: str = None, **kwargs) -> dict:
 
 # Markdown to DOCX
 @mcp.tool("markdown2docx")
-def markdown2docx(markdown_text: str, arguments: str = None, **kwargs) -> dict:
+def markdown2docx(markdown_text: str, arguments: str = None) -> dict:
     """
     将Markdown文本转换为DOCX文档格式。
     
     支持多种调用方式：
     1. 直接传入markdown_text参数（推荐）
     2. 通过arguments参数传入
-    3. 通过kwargs传入任意参数名
     
     参数说明：
     - markdown_text: 要转换的Markdown文本内容
     - arguments: 备用参数，可以传入Markdown文本
-    - **kwargs: 支持任意参数名传入Markdown文本
     
     调用示例：
     1. 推荐方式：{"markdown_text": "# 标题\\n这是内容"}
     2. 备用方式：{"arguments": "# 标题\\n这是内容"}
-    3. 灵活方式：{"content": "# 标题\\n这是内容"} 或 {"text": "# 标题\\n这是内容"}
     
     返回格式：
     {
@@ -1379,9 +1359,8 @@ def markdown2docx(markdown_text: str, arguments: str = None, **kwargs) -> dict:
         logger.info(f"原始输入长度: {len(markdown_text) if markdown_text else 0}")
         logger.info(f"原始输入预览: {repr(markdown_text[:200]) if markdown_text else 'None'}")
         logger.info(f"Arguments: {arguments}")
-        logger.info(f"Kwargs: {kwargs}")
         
-        # 处理多种输入格式 - markdown_text第一优先级（必需参数）
+        # 处理输入格式 - markdown_text第一优先级（必需参数）
         input_text = None
         
         # 第一优先级：直接传入的markdown_text参数（必需参数）
@@ -1389,34 +1368,14 @@ def markdown2docx(markdown_text: str, arguments: str = None, **kwargs) -> dict:
             input_text = markdown_text
             logger.info("使用markdown_text参数（第一优先级）")
         
-        # 第二优先级：通过arguments字段传入（向后兼容）
+        # 第二优先级：通过arguments字段传入（备用）
         elif arguments:
             input_text = arguments
             logger.info("使用arguments参数（第二优先级）")
         
-        # 第三优先级：处理嵌套的kwargs结构 {"kwargs": {"markdown_text": "内容"}}（向后兼容）
-        elif 'kwargs' in kwargs:
-            nested_kwargs = kwargs['kwargs']
-            if isinstance(nested_kwargs, dict):
-                logger.info("检测到嵌套的kwargs结构，第三优先级处理")
-                # 从嵌套的kwargs中查找文本内容
-                for key, value in nested_kwargs.items():
-                    if isinstance(value, str) and len(value) > 10:
-                        input_text = value
-                        logger.info(f"从嵌套kwargs中找到文本内容，键名: {key}，内容长度: {len(value)}")
-                        break
-        
-        # 第四优先级：从直接的kwargs中查找文本内容（向后兼容）
-        if not input_text:
-            for key, value in kwargs.items():
-                if key != 'kwargs' and isinstance(value, str) and len(value) > 10:
-                    input_text = value
-                    logger.info(f"从直接kwargs中找到文本内容，键名: {key}，内容长度: {len(value)}")
-                    break
-        
         if not input_text:
             logger.error("没有找到有效的输入内容")
-            return {"success": False, "error": "没有找到有效的输入内容，请提供markdown_text、arguments或通过kwargs传入文本内容"}
+            return {"success": False, "error": "没有找到有效的输入内容，请提供markdown_text或arguments参数"}
         
         # 使用通用JSON格式修正函数处理各种格式的输入
         logger.info(f"调用fix_json_format前的文本类型: {type(input_text)}")
@@ -1630,52 +1589,42 @@ def markdown2docx(markdown_text: str, arguments: str = None, **kwargs) -> dict:
 
 # 专门处理嵌套参数格式的markdown转换工具
 @mcp.tool("markdown_convert")
-def markdown_convert(output_format: str = "docx", **kwargs) -> dict:
+def markdown_convert(output_format: str = "docx", markdown_text: str = None, content: str = None) -> dict:
     """
-    专门处理嵌套参数格式的Markdown转换工具，kwargs为第一优先级
+    专门处理多种参数格式的Markdown转换工具
     
     参数：
     - output_format: 输出格式，支持 "docx" 或 "pdf"
-    - **kwargs: 包含markdown内容的任意参数
+    - markdown_text: markdown内容（第一优先级）
+    - content: markdown内容（第二优先级）
     
     优先级处理顺序：
-    1. {"kwargs": {"markdown_text": "内容"}} - 嵌套kwargs格式（第一优先级）
-    2. {"markdown_text": "内容"} - 直接参数格式
-    3. {"content": "内容"} - 其他字段名格式
+    1. markdown_text 参数（第一优先级）
+    2. content 参数（第二优先级）
     
     示例调用格式：
-    1. {"output_format": "docx", "kwargs": {"markdown_text": "内容"}}
-    2. {"output_format": "pdf", "markdown_text": "内容"}
-    3. {"output_format": "docx", "content": "内容"}
+    1. {"output_format": "docx", "markdown_text": "内容"}
+    2. {"output_format": "pdf", "content": "内容"}
     """
     try:
         logger.info(f"Markdown转换工具被调用，输出格式: {output_format}")
-        logger.info(f"接收到的kwargs: {kwargs}")
+        logger.info(f"markdown_text: {markdown_text}")
+        logger.info(f"content: {content}")
         
         input_text = None
         
-        # 第一优先级：处理嵌套的kwargs结构
-        if 'kwargs' in kwargs:
-            nested_kwargs = kwargs['kwargs']
-            if isinstance(nested_kwargs, dict):
-                logger.info("检测到嵌套的kwargs结构，第一优先级处理")
-                # 从嵌套的kwargs中查找文本内容
-                for key, value in nested_kwargs.items():
-                    if isinstance(value, str) and len(value) > 10:
-                        input_text = value
-                        logger.info(f"从嵌套kwargs中找到文本内容，键名: {key}，内容长度: {len(value)}")
-                        break
+        # 第一优先级：markdown_text参数
+        if markdown_text:
+            input_text = markdown_text
+            logger.info("使用markdown_text参数（第一优先级）")
         
-        # 第二优先级：处理直接的kwargs
-        if not input_text:
-            for key, value in kwargs.items():
-                if key != 'kwargs' and isinstance(value, str) and len(value) > 10:
-                    input_text = value
-                    logger.info(f"从直接kwargs中找到文本内容，键名: {key}，内容长度: {len(value)}")
-                    break
+        # 第二优先级：content参数
+        elif content:
+            input_text = content
+            logger.info("使用content参数（第二优先级）")
         
         if not input_text:
-            return {"success": False, "error": "未找到有效的markdown内容"}
+            return {"success": False, "error": "未找到有效的markdown内容，请提供markdown_text或content参数"}
         
         # 根据输出格式调用相应的转换函数
         if output_format.lower() == "docx":
