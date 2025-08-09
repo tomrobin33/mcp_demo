@@ -234,6 +234,51 @@ def debug_json_response(response):
         # 返回一个安全的错误响应
         return {"success": False, "error": "Internal server error: Invalid JSON response"}
 
+def detect_json_error_pattern(text):
+    """
+    检测并分类常见的JSON错误模式，用于调试和改进
+    
+    Returns:
+        dict: 包含错误类型和建议修复方案的字典
+    """
+    error_patterns = {
+        "malformed_quotes": False,
+        "missing_brackets": False,
+        "over_escaped": False,
+        "mixed_format": False,
+        "truncated": False
+    }
+    
+    if not text or not isinstance(text, str):
+        return {"error_type": "empty_input", "patterns": error_patterns}
+    
+    text = text.strip()
+    
+    # 检测过度转义
+    if text.count('\\"') > text.count('"') / 2:
+        error_patterns["over_escaped"] = True
+    
+    # 检测括号不匹配
+    open_brackets = text.count('{')
+    close_brackets = text.count('}')
+    if open_brackets != close_brackets:
+        error_patterns["missing_brackets"] = True
+    
+    # 检测引号不匹配
+    quote_count = text.count('"') - text.count('\\"')
+    if quote_count % 2 != 0:
+        error_patterns["malformed_quotes"] = True
+    
+    # 检测混合格式
+    if text.startswith('{') and not text.endswith('}'):
+        error_patterns["truncated"] = True
+    
+    # 检测是否是混合了JSON和纯文本
+    if ('"' in text and '{' in text) and not text.strip().startswith('{'):
+        error_patterns["mixed_format"] = True
+    
+    return {"patterns": error_patterns, "text_length": len(text)}
+
 # Note: Enhanced JSON parsing is no longer needed in newer MCP versions
 
 # 辅助函数：判断input_file是否为URL并自动下载
@@ -287,7 +332,22 @@ def get_download_url(filename):
 
 # 通用JSON格式修正函数
 def fix_json_format(text):
-    """修正各种可能的JSON格式错误，适用于所有工具"""
+    """
+    修正各种可能的JSON格式错误，适用于所有工具
+    
+    常见的大模型JSON错误模式：
+    1. 把JSON当作纯文本输出
+    2. 过度转义或转义不当
+    3. 嵌套JSON结构混乱
+    4. 特殊字符处理错误
+    5. 括号、引号不匹配
+    
+    Args:
+        text: 待修正的文本内容
+        
+    Returns:
+        修正后的文本内容
+    """
     if not text:
         return ""
     
@@ -606,6 +666,37 @@ def fix_json_format(text):
 # DOCX to PDF conversion tool
 @mcp.tool("docx2pdf")
 def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None) -> dict:
+    """
+    Convert a DOCX file to PDF format. Supports both file path, URL, and direct file content input.
+    
+    Args:
+        input_file: Path to the DOCX file or URL
+        file_content_base64: Base64 encoded content of the DOCX file
+        
+    ✅ 正确的JSON格式示例：
+    
+    方式1: 使用文件路径
+    {
+        "input_file": "/path/to/document.docx"
+    }
+    
+    方式2: 使用URL
+    {
+        "input_file": "https://example.com/document.docx"
+    }
+    
+    方式3: 使用Base64内容
+    {
+        "file_content_base64": "UEsDBBQAAAAIABcOCFGQ5..."
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"input_file": {"path": "document.docx"}}  // 嵌套对象
+    {"file_path": "document.docx"}             // 错误的参数名
+        
+    Returns:
+        Dictionary containing success status and either output file path or error message.
+    """
     import sys
     import platform
     try:
@@ -702,6 +793,34 @@ def convert_docx_to_pdf(input_file: str = None, file_content_base64: str = None)
 def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None) -> dict:
     """
     Convert a PDF file to DOCX format. Supports both file path, URL, and direct file content input.
+    
+    Args:
+        input_file: Path to the PDF file or URL
+        file_content_base64: Base64 encoded content of the PDF file
+        
+    ✅ 正确的JSON格式示例：
+    
+    方式1: 使用文件路径
+    {
+        "input_file": "/path/to/document.pdf"
+    }
+    
+    方式2: 使用URL
+    {
+        "input_file": "https://example.com/document.pdf"
+    }
+    
+    方式3: 使用Base64内容
+    {
+        "file_content_base64": "JVBERi0xLjQKJeLjz9MKMSAwIG9..."
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"input_file": {"path": "document.pdf"}}  // 嵌套对象
+    {"file_path": "document.pdf"}             // 错误的参数名
+    
+    Returns:
+        Dictionary containing success status and either output file path or error message.
     """
     try:
         logger.info(f"Starting PDF to DOCX conversion")
@@ -826,6 +945,44 @@ def convert_pdf_to_docx(input_file: str = None, file_content_base64: str = None)
 # Image format conversion tool
 @mcp.tool("convert_image")
 def convert_image(input_file: str = None, file_content_base64: str = None, output_format: str = None, input_format: str = None) -> dict:
+    """
+    Convert between different image formats (PNG, JPG, WEBP, GIF, BMP, etc.).
+    
+    Args:
+        input_file: Path to the image file or URL
+        file_content_base64: Base64 encoded content of the image file
+        output_format: Target image format (png, jpg, webp, gif, bmp, etc.)
+        input_format: Source image format (optional, auto-detected if not provided)
+        
+    ✅ 正确的JSON格式示例：
+    
+    方式1: 文件路径转换
+    {
+        "input_file": "/path/to/image.png",
+        "output_format": "jpg"
+    }
+    
+    方式2: URL转换
+    {
+        "input_file": "https://example.com/image.png",
+        "output_format": "webp"
+    }
+    
+    方式3: Base64内容转换
+    {
+        "file_content_base64": "iVBORw0KGgoAAAANSUhEUgAA...",
+        "output_format": "png",
+        "input_format": "jpg"
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"input_file": {"path": "image.png"}}      // 嵌套对象
+    {"image_path": "image.png"}                // 错误的参数名
+    {"output_format": {"type": "jpg"}}         // 格式应为字符串
+        
+    Returns:
+        Dictionary containing success status and either output file path or error message.
+    """
     try:
         temp_files = []
         if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
@@ -915,6 +1072,31 @@ def convert_image(input_file: str = None, file_content_base64: str = None, outpu
 # Excel to CSV conversion tool
 @mcp.tool("excel2csv")
 def convert_excel_to_csv(input_file: str) -> dict:
+    """
+    Convert Excel files (.xlsx, .xls) to CSV format.
+    
+    Args:
+        input_file: Path to the Excel file or URL
+        
+    ✅ 正确的JSON格式示例：
+    
+    使用文件路径:
+    {
+        "input_file": "/path/to/spreadsheet.xlsx"
+    }
+    
+    使用URL:
+    {
+        "input_file": "https://example.com/data.xlsx"
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"input_file": {"path": "spreadsheet.xlsx"}}  // 嵌套对象
+    {"excel_file": "spreadsheet.xlsx"}            // 错误的参数名
+        
+    Returns:
+        Dictionary containing success status and either output file path or error message.
+    """
     try:
         temp_files = []
         if input_file and (input_file.startswith("http://") or input_file.startswith("https://")):
@@ -942,6 +1124,38 @@ def convert_excel_to_csv(input_file: str) -> dict:
 # HTML to PDF conversion tool
 @mcp.tool("html2pdf")
 def convert_html_to_pdf(input_file: Optional[str] = None, html_content: Optional[str] = None) -> dict:
+    """
+    Convert HTML files or content to PDF format. Supports both file path, URL, and direct HTML content input.
+    
+    Args:
+        input_file: Path to the HTML file or URL
+        html_content: Raw HTML content string
+        
+    ✅ 正确的JSON格式示例：
+    
+    方式1: 使用文件路径
+    {
+        "input_file": "/path/to/page.html"
+    }
+    
+    方式2: 使用URL
+    {
+        "input_file": "https://example.com/page.html"
+    }
+    
+    方式3: 使用HTML内容
+    {
+        "html_content": "<html><head><title>测试</title></head><body><h1>标题</h1><p>内容</p></body></html>"
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"input_file": {"path": "page.html"}}      // 嵌套对象
+    {"html_file": "page.html"}                 // 错误的参数名
+    {"content": "<html>...</html>"}            // 错误的参数名
+        
+    Returns:
+        Dictionary containing success status and either output file path or error message.
+    """
     try:
         import tempfile, os, time, shutil
         from weasyprint import HTML
@@ -1099,6 +1313,39 @@ def convert_html_to_docx(input_file: Optional[str] = None, html_content: Optiona
 # Generic file conversion tool using file paths
 @mcp.tool("convert_file")
 def convert_file(input_file: str = None, file_content_base64: str = None, input_format: str = None, output_format: str = None, ctx: Context = None) -> dict:
+    """
+    Generic file conversion tool supporting various file formats.
+    
+    Args:
+        input_file: Path to the input file or URL
+        file_content_base64: Base64 encoded content of the file
+        input_format: Source file format (docx, pdf, xlsx, html, etc.)
+        output_format: Target file format (pdf, docx, csv, etc.)
+        ctx: Context object for logging
+        
+    ✅ 正确的JSON格式示例：
+    
+    使用文件路径:
+    {
+        "input_file": "/path/to/document.docx",
+        "input_format": "docx",
+        "output_format": "pdf"
+    }
+    
+    使用Base64内容:
+    {
+        "file_content_base64": "UEsDBBQAAAAIABcOCFGQ5...",
+        "input_format": "docx",
+        "output_format": "pdf"
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"input_file": {"path": "document.docx"}}   // 嵌套对象
+    {"formats": {"from": "docx", "to": "pdf"}}  // 错误的格式结构
+        
+    Returns:
+        Dictionary containing success status and either output file path or error message.
+    """
     try:
         if ctx:
             ctx.info(f"Converting from {input_format} to {output_format}")
@@ -1149,6 +1396,26 @@ def convert_content(file_content_base64: str, input_format: str, output_format: 
         file_content_base64: Base64 encoded content of the input file
         input_format: Source format (e.g., "docx", "pdf", "md")
         output_format: Target format (e.g., "pdf", "docx")
+        
+    ✅ 正确的JSON格式示例：
+    
+    DOCX转PDF:
+    {
+        "file_content_base64": "UEsDBBQAAAAIABcOCFGQ5...",
+        "input_format": "docx",
+        "output_format": "pdf"
+    }
+    
+    PDF转DOCX:
+    {
+        "file_content_base64": "JVBERi0xLjQKJeLjz9MKMSAwIG9...",
+        "input_format": "pdf",
+        "output_format": "docx"
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"content": "UEsDBBQ..."}                      // 错误的参数名
+    {"file_content_base64": {"data": "UEsDBBQ"}}  // 嵌套对象
         
     Returns:
         Dictionary containing success status and either base64 encoded file or error message.
@@ -1224,14 +1491,25 @@ def markdown2pdf(markdown_text: str, arguments: str = None) -> dict:
     将Markdown文本转换为PDF文档格式。
     
     参数：
-    - markdown_text: 要转换的Markdown文本内容
-    - arguments: JSON字符串格式的参数，包含markdown_text字段
+    - markdown_text: 要转换的Markdown文本内容 (必需参数)
+    - arguments: 备用参数，用于传入markdown内容
     
-    正确的调用方式：
-    {"arguments": "{\"markdown_text\": \"# 标题\\n这是内容\"}"}
+    ✅ 正确的JSON格式示例：
     
-    或者直接传入：
-    {"markdown_text": "# 标题\\n这是内容"}
+    方式1 (推荐): 直接传入markdown_text参数
+    {
+        "markdown_text": "# 我的标题\n\n这是一段内容\n\n- 列表项1\n- 列表项2\n\n```python\nprint('代码块')\n```"
+    }
+    
+    方式2: 使用arguments参数作为备用
+    {
+        "markdown_text": "",
+        "arguments": "# 我的标题\n\n这是一段内容"
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"arguments": "{\"markdown_text\": \"内容\"}"}  // 过度嵌套JSON
+    {"markdown_text": "{\"content\": \"内容\"}"}   // 错误的JSON嵌套
     
     返回格式：
     {
@@ -1241,12 +1519,11 @@ def markdown2pdf(markdown_text: str, arguments: str = None) -> dict:
         "error": "错误信息（如果失败）"
     }
     
-    注意：
-    - 支持各种Markdown语法：标题、列表、链接、代码块等
-    - 自动处理JSON格式的输入
-    - 使用html2pdf工具链进行转换
-    - 支持中文内容
-    - arguments参数应该是包含markdown_text字段的JSON字符串
+    功能特性：
+    - 支持完整Markdown语法：标题、列表、链接、代码块、表格等
+    - 智能处理各种JSON格式输入和错误修复
+    - 中文内容完美支持
+    - 自动生成下载链接
     """
     import tempfile, os, time, shutil
     try:
@@ -1326,14 +1603,25 @@ def markdown2docx(markdown_text: str, arguments: str = None) -> dict:
     将Markdown文本转换为DOCX文档格式。
     
     参数：
-    - markdown_text: 要转换的Markdown文本内容
-    - arguments: JSON字符串格式的参数，包含markdown_text字段
+    - markdown_text: 要转换的Markdown文本内容 (必需参数)
+    - arguments: 备用参数，用于传入markdown内容
     
-    正确的调用方式：
-    {"arguments": "{\"markdown_text\": \"# 标题\\n这是内容\"}"}
+    ✅ 正确的JSON格式示例：
     
-    或者直接传入：
-    {"markdown_text": "# 标题\\n这是内容"}
+    方式1 (推荐): 直接传入markdown_text参数
+    {
+        "markdown_text": "# 我的文档\n\n## 章节1\n\n这是一段**粗体**文本和*斜体*文本。\n\n- 列表项1\n- 列表项2\n\n| 表头1 | 表头2 |\n|-------|-------|\n| 内容1 | 内容2 |"
+    }
+    
+    方式2: 使用arguments参数作为备用
+    {
+        "markdown_text": "",
+        "arguments": "# 我的文档\n\n这是内容"
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"arguments": "{\"markdown_text\": \"内容\"}"}  // 过度嵌套JSON
+    {"markdown_text": "{\"content\": \"内容\"}"}   // 错误的JSON嵌套
     
     返回格式：
     {
@@ -1343,11 +1631,12 @@ def markdown2docx(markdown_text: str, arguments: str = None) -> dict:
          "error": "错误信息（如果失败）"
     }
     
-    注意：
-    - 支持各种Markdown语法：标题、列表、链接、代码块等
-    - 自动上传到静态服务器
-    - 支持中文内容
-    - arguments参数应该是包含markdown_text字段的JSON字符串
+    功能特性：
+    - 支持完整Markdown语法：标题、列表、链接、代码块、表格等
+    - 使用Pandoc进行高质量转换
+    - 智能处理各种JSON格式输入和错误修复
+    - 中文内容完美支持
+    - 自动生成下载链接
     """
     import tempfile, os, time, shutil, subprocess
     try:
@@ -1588,20 +1877,41 @@ def markdown2docx(markdown_text: str, arguments: str = None) -> dict:
 @mcp.tool("markdown_convert")
 def markdown_convert(output_format: str = "docx", markdown_text: str = None, content: str = None) -> dict:
     """
-    专门处理多种参数格式的Markdown转换工具
+    专门处理多种参数格式的Markdown转换工具，支持转换为DOCX或PDF格式。
     
     参数：
-    - output_format: 输出格式，支持 "docx" 或 "pdf"
+    - output_format: 输出格式，支持 "docx" 或 "pdf" (默认: "docx")
     - markdown_text: markdown内容（第一优先级）
     - content: markdown内容（第二优先级）
+    
+    ✅ 正确的JSON格式示例：
+    
+    转换为DOCX (推荐):
+    {
+        "output_format": "docx",
+        "markdown_text": "# 我的文档\n\n这是一段内容\n\n- 列表项1\n- 列表项2"
+    }
+    
+    转换为PDF:
+    {
+        "output_format": "pdf",
+        "markdown_text": "# 标题\n\n内容"
+    }
+    
+    使用content参数 (备用):
+    {
+        "output_format": "docx",
+        "content": "# 标题\n\n内容"
+    }
+    
+    ❌ 错误示例 (请避免):
+    {"format": "docx", "text": "内容"}              // 错误的参数名
+    {"output_format": {"type": "docx"}}              // 格式应为字符串
+    {"markdown_text": {"content": "内容"}}           // 嵌套对象
     
     优先级处理顺序：
     1. markdown_text 参数（第一优先级）
     2. content 参数（第二优先级）
-    
-    示例调用格式：
-    1. {"output_format": "docx", "markdown_text": "内容"}
-    2. {"output_format": "pdf", "content": "内容"}
     """
     try:
         logger.info(f"Markdown转换工具被调用，输出格式: {output_format}")
