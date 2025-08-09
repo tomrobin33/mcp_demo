@@ -1223,17 +1223,15 @@ def markdown2pdf(markdown_text: str, arguments: str = None) -> dict:
     """
     将Markdown文本转换为PDF文档格式。
     
-    支持多种调用方式：
-    1. 直接传入markdown_text参数（推荐）
-    2. 通过arguments参数传入
-    
-    参数说明：
+    参数：
     - markdown_text: 要转换的Markdown文本内容
-    - arguments: 备用参数，可以传入Markdown文本
+    - arguments: JSON字符串格式的参数，包含markdown_text字段
     
-    调用示例：
-    1. 推荐方式：{"markdown_text": "# 标题\\n这是内容"}
-    2. 备用方式：{"arguments": "# 标题\\n这是内容"}
+    正确的调用方式：
+    {"arguments": "{\"markdown_text\": \"# 标题\\n这是内容\"}"}
+    
+    或者直接传入：
+    {"markdown_text": "# 标题\\n这是内容"}
     
     返回格式：
     {
@@ -1248,6 +1246,7 @@ def markdown2pdf(markdown_text: str, arguments: str = None) -> dict:
     - 自动处理JSON格式的输入
     - 使用html2pdf工具链进行转换
     - 支持中文内容
+    - arguments参数应该是包含markdown_text字段的JSON字符串
     """
     import tempfile, os, time, shutil
     try:
@@ -1326,17 +1325,15 @@ def markdown2docx(markdown_text: str, arguments: str = None) -> dict:
     """
     将Markdown文本转换为DOCX文档格式。
     
-    支持多种调用方式：
-    1. 直接传入markdown_text参数（推荐）
-    2. 通过arguments参数传入
-    
-    参数说明：
+    参数：
     - markdown_text: 要转换的Markdown文本内容
-    - arguments: 备用参数，可以传入Markdown文本
+    - arguments: JSON字符串格式的参数，包含markdown_text字段
     
-    调用示例：
-    1. 推荐方式：{"markdown_text": "# 标题\\n这是内容"}
-    2. 备用方式：{"arguments": "# 标题\\n这是内容"}
+    正确的调用方式：
+    {"arguments": "{\"markdown_text\": \"# 标题\\n这是内容\"}"}
+    
+    或者直接传入：
+    {"markdown_text": "# 标题\\n这是内容"}
     
     返回格式：
     {
@@ -1348,9 +1345,9 @@ def markdown2docx(markdown_text: str, arguments: str = None) -> dict:
     
     注意：
     - 支持各种Markdown语法：标题、列表、链接、代码块等
-    - 自动处理JSON格式的输入
     - 自动上传到静态服务器
     - 支持中文内容
+    - arguments参数应该是包含markdown_text字段的JSON字符串
     """
     import tempfile, os, time, shutil, subprocess
     try:
